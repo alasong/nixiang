@@ -1,10 +1,11 @@
 PY ?= python3
 
-.PHONY: help setup test demo demo-fresh real-check cluster clean
+.PHONY: help setup test docs-check demo demo-fresh real-check cluster clean
 
 help:
 	@echo "make setup       建 venv 并装依赖（等同 ./bootstrap.sh）"
 	@echo "make test        跑全部单测 + 集成测试（零依赖，用系统 python 即可）"
+	@echo "make docs-check  检查 README 的测试数/入口/make 目标是否与代码一致"
 	@echo "make demo        三路径对照实验（纯标准库，无需 venv）"
 	@echo "make demo-fresh  同上，但先清空 runs/"
 	@echo "make real-check  真实数据集复现（需 numpy/pandas/pyarrow/sklearn）"
@@ -15,7 +16,10 @@ setup:
 	./bootstrap.sh
 
 test:
-	$(PY) -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_budget mvp.test_budget_runner mvp.test_miner mvp.test_scenarios mvp.test_subgoal mvp.test_retire mvp.test_maintenance mvp.test_self_bootstrap mvp.test_e2e mvp.test_names_resolution mvp.test_llm_deepseek -v
+	$(PY) -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_budget mvp.test_budget_runner mvp.test_miner mvp.test_scenarios mvp.test_subgoal mvp.test_retire mvp.test_maintenance mvp.test_self_bootstrap mvp.test_e2e mvp.test_names_resolution mvp.test_doccheck mvp.test_llm_deepseek -v
+
+docs-check:
+	$(PY) tools/check_docs.py
 
 demo:
 	$(PY) -m mvp
