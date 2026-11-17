@@ -69,6 +69,7 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 | `python3 -m mvp.maintenance --demo` | 维护回路：巡检 → 晋升 → 淘汰 → 路由（`--dir` 可重复跑） | 否 |
 | `python3 -m mvp.self_bootstrap --demo` | 从自身轨迹导出任务清单并跑 H1 聚类（不依赖人手写） | 否 |
 | `python3 -m mvp.e2e` | 端到端回路：跑任务 → 自举 → H1 → 判红 → 维护（无人工步骤） | 否 |
+| `python3 tools/h1_sweep.py --dataset banking77 --n 200 --seeds 0,1,2,3` | H1 阈值扫描 + 多抽样稳定性 | 是（读 parquet） |
 | `python3 tools/real_check.py --dataset all` | 真实数据集上的覆盖率-准确率-降本三角 | 是 |
 | `python3 tools/cluster_check.py --demo` | 聚类检验，判定任务有无分布 | 否（demo）/ 是（真实数据） |
 
@@ -122,6 +123,7 @@ tools/
   real_c_check.py    C 路径真实化（真实答案索引 + 真实模型补未命中）
   real_llm_check.py  真实 API 的 A/B 对照
   cluster_check.py   H1 聚类检验
+  h1_sweep.py        H1 阈值扫描 + 多抽样稳定性（判据对抽样是否敏感）
 
 data/                700KB 公开数据集，已内置，可离线
 docs/                设计文档、契约、基线声明、实验报告
