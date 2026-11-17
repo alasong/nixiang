@@ -71,6 +71,7 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 | `python3 -m mvp.e2e` | 端到端回路：跑任务 → 自举 → H1 → 判红 → 维护（无人工步骤） | 否 |
 | `python3 tools/h1_sweep.py --dataset banking77 --n 200 --seeds 0,1,2,3` | H1 阈值扫描 + 多抽样稳定性 | 是（读 parquet） |
 | `python3 tools/family_stats.py --jsonl tasks.jsonl` | 按族标签直接统计分布（比聚类稳） | 否（jsonl）/ 是（banking77） |
+| `.venv/bin/python tools/real_e2e.py --names /tmp/b77_readme.md` | 真实数据端到端：轨迹 + 两种 H1 + 巡检 + 混合成本 | 是（读 parquet） |
 | `python3 tools/real_check.py --dataset all` | 真实数据集上的覆盖率-准确率-降本三角 | 是 |
 | `python3 tools/cluster_check.py --demo` | 聚类检验，判定任务有无分布 | 否（demo）/ 是（真实数据） |
 
@@ -126,6 +127,7 @@ tools/
   cluster_check.py   H1 聚类检验
   h1_sweep.py        H1 阈值扫描 + 多抽样稳定性（判据对抽样是否敏感）
   family_stats.py    按族标签直接统计分布（有标签时不必聚类）
+  real_e2e.py        真实数据端到端：轨迹 + 两种 H1 口径对照 + 巡检
 
 data/                700KB 公开数据集，已内置，可离线
 docs/                设计文档、契约、基线声明、实验报告
@@ -217,7 +219,7 @@ python3 tools/cluster_check.py my_tasks.jsonl --threshold 0.24
 python3 tools/family_stats.py --jsonl my_tasks_with_family.jsonl
 ```
 
-标签口径不受阈值与抽样影响，比聚类稳。聚类结果对抽样敏感时（`tools/h1_sweep.py --seeds` 会告诉你敏感程度），优先用这一条。
+标签口径不受阈值与抽样影响，比聚类稳。`tools/real_e2e.py` 在 400 条真实查询上做过对照：**同一批数据，标签口径 9 族成立，聚类口径 τ=0.24 并成 1 簇**——真实文本上聚类口径会误判，优先用标签。
 
 这一步过不了，后面的 MVP、逆向链、双环调度全都不必做。这是唯一能决定方向的一步，也是唯一不能靠讨论替代的一步。
 
