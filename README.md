@@ -70,6 +70,7 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 | `python3 -m mvp.self_bootstrap --demo` | 从自身轨迹导出任务清单并跑 H1 聚类（不依赖人手写） | 否 |
 | `python3 -m mvp.e2e` | 端到端回路：跑任务 → 自举 → H1 → 判红 → 维护（无人工步骤） | 否 |
 | `python3 tools/h1_sweep.py --dataset banking77 --n 200 --seeds 0,1,2,3` | H1 阈值扫描 + 多抽样稳定性 | 是（读 parquet） |
+| `python3 tools/family_stats.py --jsonl tasks.jsonl` | 按族标签直接统计分布（比聚类稳） | 否（jsonl）/ 是（banking77） |
 | `python3 tools/real_check.py --dataset all` | 真实数据集上的覆盖率-准确率-降本三角 | 是 |
 | `python3 tools/cluster_check.py --demo` | 聚类检验，判定任务有无分布 | 否（demo）/ 是（真实数据） |
 
@@ -124,6 +125,7 @@ tools/
   real_llm_check.py  真实 API 的 A/B 对照
   cluster_check.py   H1 聚类检验
   h1_sweep.py        H1 阈值扫描 + 多抽样稳定性（判据对抽样是否敏感）
+  family_stats.py    按族标签直接统计分布（有标签时不必聚类）
 
 data/                700KB 公开数据集，已内置，可离线
 docs/                设计文档、契约、基线声明、实验报告
@@ -208,6 +210,14 @@ python3 tools/cluster_check.py my_tasks.jsonl --threshold 0.24
 | 5-8 个簇，每簇 ≥5 条 | 有分布，这套架构成立，继续 |
 | 簇数很多、每簇 1-2 条 | 没有分布，**换单任务高质量执行思路，不要做这套** |
 | 全部并成 1-2 个大簇 | 阈值偏低或任务描述太笼统，调 `--threshold` 重跑 |
+
+**如果任务已经带族标签**（工单分类、业务类型），不用靠文本聚类猜，直接数：
+
+```bash
+python3 tools/family_stats.py --jsonl my_tasks_with_family.jsonl
+```
+
+标签口径不受阈值与抽样影响，比聚类稳。聚类结果对抽样敏感时（`tools/h1_sweep.py --seeds` 会告诉你敏感程度），优先用这一条。
 
 这一步过不了，后面的 MVP、逆向链、双环调度全都不必做。这是唯一能决定方向的一步，也是唯一不能靠讨论替代的一步。
 
