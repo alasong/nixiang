@@ -17,6 +17,7 @@ class ExperienceItem:
     trace_id: str
     snapshot_vid: str
     verdict: Verdict
+    logged_at: str = ""          # ISO 时间；空表示旧记录，时间规则跳过它
 
 
 class ExperienceStore:

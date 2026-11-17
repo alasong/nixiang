@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from datetime import datetime, timedelta, timezone
+
 from mvp.contracts import Kind, Status, Verdict
 from mvp.llm import Shot
 from mvp.persistence import RunStore
@@ -14,9 +16,13 @@ from mvp.store import ExperienceItem
 DECISIVE = Verdict(Status.PASS, Kind.DECISIVE, 1.0, "ok")
 
 
-def item(shot_id: str) -> ExperienceItem:
+def item(shot_id: str, logged_days_ago: int | None = None) -> ExperienceItem:
+    logged = ""
+    if logged_days_ago is not None:
+        logged = (datetime.now(timezone.utc)
+                  - timedelta(days=logged_days_ago)).isoformat(timespec="seconds")
     return ExperienceItem(Shot(shot_id, "fam", set(), f"经验 {shot_id}"),
-                          "T1", "v1", DECISIVE)
+                          "T1", "v1", DECISIVE, logged_at=logged)
 
 
 class TestRetire(unittest.TestCase):
@@ -58,6 +64,29 @@ class TestRetire(unittest.TestCase):
         self.assertEqual([s.id for s in self.sink.load_experience().retrieve("fam")], ["B"])
         self.assertEqual(self.sink.counts()["experience"], 2)
         self.assertEqual(self.sink.counts()["retired"], 1)
+
+    def test_stale_unused_experience_is_retired(self) -> None:
+        self.sink.append_experience(item("OLD", logged_days_ago=120))
+        decisions = {d.shot_id: d for d in evaluate(self.sink.load_experience())}
+        self.assertTrue(decisions["OLD"].retire)
+        self.assertIn("从未被使用", decisions["OLD"].reason)
+
+    def test_fresh_unused_experience_is_kept(self) -> None:
+        self.sink.append_experience(item("NEW", logged_days_ago=3))
+        decisions = {d.shot_id: d for d in evaluate(self.sink.load_experience())}
+        self.assertFalse(decisions["NEW"].retire)
+
+    def test_used_once_old_experience_is_kept(self) -> None:
+        """低频但用过的不按时间杀——保守优先，避免误伤正确的稀有经验。"""
+        self.sink.append_experience(item("RARE", logged_days_ago=300))
+        decisions = {d.shot_id: d for d in evaluate(
+            self.sink.load_experience(),
+            [{"shot_ids": ["RARE"], "outcome": "pass"}])}
+        self.assertFalse(decisions["RARE"].retire)
+
+    def test_legacy_item_without_timestamp_is_kept(self) -> None:
+        decisions = {d.shot_id: d for d in evaluate(self.sink.load_experience())}
+        self.assertFalse(decisions["A"].retire)
 
     def test_idempotent(self) -> None:
         usage = [{"shot_ids": ["A"], "outcome": "fail"}] * 2

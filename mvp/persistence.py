@@ -77,7 +77,7 @@ def encode_experience(it: ExperienceItem) -> dict:
         "trace_id": it.trace_id,
         "snapshot_vid": it.snapshot_vid,
         "verdict": it.verdict.to_dict(),
-        "logged_at": _now(),
+        "logged_at": it.logged_at or _now(),
     }
 
 
@@ -90,6 +90,7 @@ def decode_experience(d: dict) -> ExperienceItem:
         snapshot_vid=d["snapshot_vid"],
         verdict=Verdict(Status(v["status"]), Kind(v["kind"]),
                         float(v["confidence"]), v.get("detail", "")),
+        logged_at=d.get("logged_at", ""),
     )
 
 

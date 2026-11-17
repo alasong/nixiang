@@ -14,9 +14,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from .contracts import Kind
 
 MIN_USES = 2
 MAX_FAIL_RATE = 0.3
+STALE_DAYS = 90
+
+
+def _age_days(stamp: str, now: datetime) -> int | None:
+    try:
+        when = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return (now - when).days
 
 
 @dataclass(frozen=True)
@@ -28,8 +42,19 @@ class Decision:
     reason: str
 
 
-def evaluate(store, usage: list[dict], min_uses: int = MIN_USES,
-             max_fail_rate: float = MAX_FAIL_RATE) -> list[Decision]:
+def evaluate(store, usage: list[dict] | None = None, min_uses: int = MIN_USES,
+             max_fail_rate: float = MAX_FAIL_RATE,
+             stale_days: int = STALE_DAYS,
+             now: datetime | None = None) -> list[Decision]:
+    """两条淘汰判据：
+
+      1. 失败率：使用 ≥ min_uses 且失败率 ≥ max_fail_rate
+      2. 时间：decisive 且**从未被使用**，沉淀已超 stale_days
+
+    时间规则刻意保守：只杀「一次都没被用过」的。低频但正确的经验若按
+    “最近使用距今”杀，会被误伤。
+    """
+    usage = usage or []
     history: dict[str, list[str]] = {}
     for rec in usage:
         for shot_id in rec.get("shot_ids", []):
@@ -41,9 +66,20 @@ def evaluate(store, usage: list[dict], min_uses: int = MIN_USES,
         uses = len(outcomes)
         failed = sum(1 for o in outcomes if o != "pass")
         rate = failed / uses if uses else 0.0
-        ok = uses >= min_uses and rate >= max_fail_rate
-        if ok:
+        fail_rule = uses >= min_uses and rate >= max_fail_rate
+
+        age_rule = False
+        age = _age_days(item.logged_at, now or datetime.now(timezone.utc)) \
+            if item.logged_at else None
+        if (not fail_rule and uses == 0 and age is not None
+                and item.verdict.kind == Kind.DECISIVE and age >= stale_days):
+            age_rule = True
+
+        ok = fail_rule or age_rule
+        if fail_rule:
             reason = f"{failed}/{uses} 次复用失败（{rate:.0%} ≥ {max_fail_rate:.0%}）"
+        elif age_rule:
+            reason = f"沉淀 {age} 天从未被使用（≥ {stale_days} 天）"
         elif uses < min_uses:
             reason = f"使用 {uses} 次 < {min_uses}，样本不足"
         else:
