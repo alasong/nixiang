@@ -108,6 +108,26 @@ class RuleStore:
         return tuple(self._rules)
 
 
+def rule_field_reads(rule: Rule) -> int:
+    """不短路时的读取次数上界 = 叶子里字段出现的总次数。
+
+    OR 分支各自持有一份条件，共享字段会被重复读——所以上界不能按去重后的
+    字段数算，否则 R2 这类规则会显得「越界」。
+    """
+    total = 0
+
+    def walk(node) -> None:
+        nonlocal total
+        if isinstance(node, Fact):
+            total += len(node.fields)
+        else:
+            for child in node.children:
+                walk(child)
+
+    walk(rule.condition)
+    return total
+
+
 def rule_fields(rule: Rule) -> tuple[str, ...]:
     """一条规则依赖的全部字段（按出现顺序去重）。逆向展开的输入。"""
     seen: list[str] = []
