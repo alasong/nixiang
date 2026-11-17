@@ -92,7 +92,8 @@ def run_path(
             sink.append_negative(t, reason=_why(t))
 
     for task in tasks:
-        trace = Trace(task_id=task.id, verifier_vid=verifier.vid)
+        trace = Trace(task_id=task.id, verifier_vid=verifier.vid,
+                      task_text=task.render()[:200])
         shots = store.retrieve(task.scene_tag(), k=2) if use_shots else []
         text = task.render()
 

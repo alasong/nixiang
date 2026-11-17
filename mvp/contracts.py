@@ -89,6 +89,7 @@ class Trace:
     verifier_vid: str = "vf0"
     outcome: Status = Status.UNKNOWN
     attempts: int = 0
+    task_text: str = ""      # 任务描述原文（脱敏由调用方负责），H1 聚类要用
 
     @property
     def total_cost(self) -> int:
@@ -97,6 +98,7 @@ class Trace:
     def to_dict(self) -> dict:
         return {
             "task_id": self.task_id,
+            "task_text": self.task_text,
             "snapshot_vid": self.snapshot_vid,
             "verifier_vid": self.verifier_vid,
             "outcome": self.outcome.value,
