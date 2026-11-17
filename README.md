@@ -27,10 +27,10 @@ python3 -m mvp
 想看测试：
 
 ```bash
-python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_budget mvp.test_miner mvp.test_llm_deepseek -v
+python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_budget mvp.test_miner mvp.test_scenarios mvp.test_llm_deepseek -v
 ```
 
-77 个测试，同样零依赖。
+81 个测试，同样零依赖。
 
 ---
 
@@ -104,7 +104,7 @@ mvp/                 核心实验（纯标准库）
   demo_real_task.py  调研任务沉淀演示
   demo_dual_loop.py  双环三轮演示（探索 → 复核 → 晋升 → 复用）
   route_and_sentry.py 路由与哨兵演示
-  test_*.py          77 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向）
+  test_*.py          81 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
