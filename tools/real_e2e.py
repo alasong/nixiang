@@ -31,6 +31,9 @@ from mvp.snapshot import SnapshotStore  # noqa: E402
 
 HIT_COST = 10
 MODEL_COST = 583        # 前次真实 API 实测（deepseek-chat，77 类目录）参考值
+MODEL_ACC = 0.738       # 前次同批样本上的模型准确率
+COST_GATE = -40.0       # §6.4
+QUALITY_GATE = -5.0
 
 
 def _load(name: str, path: Path):
@@ -43,7 +46,8 @@ def _load(name: str, path: Path):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=400, help="写入轨迹的查询样本数")
-    ap.add_argument("--tau", type=float, default=0.6)
+    ap.add_argument("--tau", type=float, default=0.6, help="写轨迹用的阈值")
+    ap.add_argument("--taus", default="", help="另给一组阈值做工作点扫描，如 0.5,0.6,0.7")
     ap.add_argument("--threshold", type=float, default=0.24, help="聚类 H1 的相似度阈值")
     ap.add_argument("--names", default="", help="banking77 README，用于粗粒度族标签")
     ap.add_argument("--dir", default=str(RUNS_DIR / "real-e2e"))
@@ -111,6 +115,24 @@ def main() -> None:
     mixed_cost = coverage * HIT_COST + (1 - coverage) * MODEL_COST
     cost_change = (mixed_cost - MODEL_COST) / MODEL_COST * 100
 
+    # 工作点扫描：每个 τ 的成本/质量与 §6.4 判红
+    operating = []
+    if args.taus:
+        for tau in [float(x) for x in args.taus.split(",")]:
+            hit_mask = sim1[sample] >= tau
+            c = float(hit_mask.mean())
+            a = float((nn_label[sample][hit_mask] == y_q[sample][hit_mask]).mean()) \
+                if hit_mask.any() else 0.0
+            mixed = c * HIT_COST + (1 - c) * MODEL_COST
+            blended = c * a + (1 - c) * MODEL_ACC
+            cost_pct = (mixed - MODEL_COST) / MODEL_COST * 100
+            quality_pp = (blended - MODEL_ACC) * 100
+            operating.append({
+                "tau": tau, "coverage": c, "hit_acc": a, "cost": mixed,
+                "cost_pct": cost_pct, "quality_pp": quality_pp,
+                "passed": cost_pct <= COST_GATE and quality_pp >= QUALITY_GATE,
+            })
+
     # H1：标签口径 + 聚类口径
     label_h1 = family_tool.summarize(family_items)
     from mvp.self_bootstrap import collect_tasks
@@ -126,6 +148,23 @@ def main() -> None:
     print(f"覆盖率 {coverage*100:.1f}%   命中准确率 {hit_acc*100:.1f}%")
     print(f"混合成本 {mixed_cost:.0f} tokens/条（命中 {HIT_COST}，未命中参考 {MODEL_COST}）"
           f" → {cost_change:+.1f}%")
+    if operating:
+        print("\n工作点扫描（§6.4：成本降 ≥40% 且质量掉 ≤5pp）")
+        print(f"{'τ':>6}{'覆盖率':>8}{'命中准确':>9}{'混合成本':>9}"
+              f"{'成本变化':>10}{'混合准确':>9}{'质量变化':>9}{'判红':>6}")
+        for row in operating:
+            print(f"{row['tau']:>6.2f}{row['coverage']*100:>7.1f}%"
+                  f"{row['hit_acc']*100:>8.1f}%{row['cost']:>9.0f}"
+                  f"{row['cost_pct']:>9.1f}%{ (row['coverage']*row['hit_acc'] + (1-row['coverage'])*MODEL_ACC)*100:>8.1f}%"
+                  f"{row['quality_pp']:>+8.1f}pp{'通过' if row['passed'] else '不通过':>6}")
+        ok = [r for r in operating if r["passed"]]
+        if ok:
+            best = min(ok, key=lambda r: r["cost"])
+            print(f"  结论：推荐工作点 τ={best['tau']:.2f}"
+                  f"（成本 {best['cost_pct']:.1f}%，质量 {best['quality_pp']:+.1f}pp）")
+        else:
+            print("  结论：给出的阈值里没有同时过两道门的")
+
     print(f"\nH1 标签口径（{label_note}）：{label_h1['verdict']}")
     print(f"  族数 {label_h1['n_families']}  最小 {label_h1['min_size']}  "
           f"前 5 族占比 {label_h1['top5_share']*100:.0f}%")
