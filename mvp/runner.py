@@ -86,7 +86,8 @@ def run_path(
             t = Trace(task_id=f"{name_prefix}:{trace.task_id}",
                       steps=trace.steps, snapshot_vid=trace.snapshot_vid,
                       verifier_vid=trace.verifier_vid,
-                      outcome=trace.outcome, attempts=trace.attempts)
+                      outcome=trace.outcome, attempts=trace.attempts,
+                      task_text=trace.task_text)
         sink.append_trace(t)
         if t.outcome != Status.PASS:
             sink.append_negative(t, reason=_why(t))

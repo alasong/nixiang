@@ -30,7 +30,7 @@ python3 -m mvp
 python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_budget mvp.test_budget_runner mvp.test_miner mvp.test_scenarios mvp.test_subgoal mvp.test_retire mvp.test_maintenance mvp.test_llm_deepseek -v
 ```
 
-114 个测试，同样零依赖。
+119 个测试，同样零依赖。
 
 ---
 
@@ -68,6 +68,7 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 | `python3 -m mvp.budget --demo` | 预算切分与守恒（禁止透支、未用归还） | 否 |
 | `python3 -m mvp.maintenance --demo` | 维护回路：巡检 → 晋升 → 淘汰 → 路由（`--dir` 可重复跑） | 否 |
 | `python3 -m mvp.self_bootstrap --demo` | 从自身轨迹导出任务清单并跑 H1 聚类（不依赖人手写） | 否 |
+| `python3 -m mvp.e2e` | 端到端回路：跑任务 → 自举 → H1 → 判红 → 维护（无人工步骤） | 否 |
 | `python3 tools/real_check.py --dataset all` | 真实数据集上的覆盖率-准确率-降本三角 | 是 |
 | `python3 tools/cluster_check.py --demo` | 聚类检验，判定任务有无分布 | 否（demo）/ 是（真实数据） |
 
@@ -105,6 +106,7 @@ mvp/                 核心实验（纯标准库）
   miner.py           从负证据挖候选短路规则
   maintenance.py     维护回路：巡检 → 晋升 → 淘汰 → 路由
   self_bootstrap.py  从轨迹导出任务清单并跑 H1（不依赖人手写）
+  e2e.py             端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
   evaluator.py       留出集评估 + §6.4 判红门
   router.py          只读聚合统计的路由决策
   sentry.py          渐进失效探针（只报警，不改数据）
@@ -113,7 +115,7 @@ mvp/                 核心实验（纯标准库）
   demo_real_task.py  调研任务沉淀演示
   demo_dual_loop.py  双环三轮演示（探索 → 复核 → 晋升 → 复用）
   route_and_sentry.py 路由与哨兵演示
-  test_*.py          114 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向 / 契约场景）
+  test_*.py          119 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向 / 契约场景）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
