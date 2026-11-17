@@ -27,10 +27,10 @@ python3 -m mvp
 想看测试：
 
 ```bash
-python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_llm_deepseek -v
+python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_budget mvp.test_miner mvp.test_llm_deepseek -v
 ```
 
-67 个测试，同样零依赖。
+77 个测试，同样零依赖。
 
 ---
 
@@ -54,7 +54,7 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 
 ---
 
-## 四个入口
+## 入口
 
 | 命令 | 做什么 | 要依赖吗 |
 |---|---|---|
@@ -63,6 +63,8 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 | `python3 -m mvp.demo_dual_loop` | 双环三轮：探索 → 复核 → 自动晋升 → 命中复用（含时效核验） | 否 |
 | `python3 -m mvp.evaluator` | 留出集评估：经验与索引只用训练段，按 §6.4 判红 | 否 |
 | `python3 -m mvp.route_and_sentry --demo` | 路由决策 + 哨兵巡检（演示目录里埋了四类问题） | 否 |
+| `python3 -m mvp.miner --demo` | 从负证据挖候选短路规则（support / counter） | 否 |
+| `python3 -m mvp.budget --demo` | 预算切分与守恒（禁止透支、未用归还） | 否 |
 | `python3 tools/real_check.py --dataset all` | 真实数据集上的覆盖率-准确率-降本三角 | 是 |
 | `python3 tools/cluster_check.py --demo` | 聚类检验，判定任务有无分布 | 否（demo）/ 是（真实数据） |
 
@@ -102,7 +104,7 @@ mvp/                 核心实验（纯标准库）
   demo_real_task.py  调研任务沉淀演示
   demo_dual_loop.py  双环三轮演示（探索 → 复核 → 晋升 → 复用）
   route_and_sentry.py 路由与哨兵演示
-  test_*.py          67 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向）
+  test_*.py          77 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
