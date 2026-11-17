@@ -24,7 +24,11 @@ from .store import ExperienceItem
 
 
 def build_fixture(root: Path) -> tuple[RunStore, SnapshotStore]:
-    """造一份确定性的历史（可重复运行；调用方负责先清目录）。"""
+    """造一份确定性的历史。每次重建目录，保证重复运行读数不变。"""
+    import shutil
+
+    if root.exists():
+        shutil.rmtree(root)
     sink = RunStore(root)
     snaps = SnapshotStore(root / "snapshots")
 

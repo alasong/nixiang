@@ -161,6 +161,9 @@ def reuse_trace(vid: str, hits: list[Shot], status: str, detail: str) -> Trace:
 
 
 def main() -> None:
+    import shutil
+    if ROOT.exists():
+        shutil.rmtree(ROOT)
     sink = RunStore(ROOT)
     snapshots = SnapshotStore(SNAPS)
     snap0 = snapshots.commit(VERIFIER_VID, [], source="初始快照：经验库为空")
