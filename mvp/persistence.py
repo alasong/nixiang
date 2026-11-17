@@ -1,0 +1,181 @@
+"""沉淀物落盘。对应契约 v2 的 §2（权限矩阵）与 §3（可重放）。
+
+设计约束
+--------
+1. **append-only**：只用 "a" 模式，永不改写已有行。契约 §2 明确内环可写失败
+   日志，但不得修改快照与历史轨迹。
+2. **双版本绑定**：每条记录都带 snapshot_vid / verifier_vid，否则验证器升级后
+   无法判断该记录是按哪套标准判的（契约 §3.2）。
+3. **可重放**：Step.output 是结构化结果，能被任意版本的验证器重新判定。
+   这条不成立，"能力提升"就没有载体 —— 见 REAL_DATA_REPORT 第九节的推演。
+
+三类沉淀物
+----------
+traces.jsonl      执行轨迹（外环探索 + 内环收敛都写这里）
+negative.jsonl    负证据（失败路径，内环 append-only 写入）
+experience.jsonl  经验条目（带置信分层，外环写、内环只读高置信层）
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .contracts import Judgment, Kind, Status, Step, Trace, Verdict
+from .llm import Shot
+from .store import ExperienceItem, ExperienceStore
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# ---------------------------------------------------------------- 序列化
+
+def encode_trace(t: Trace) -> dict:
+    d = t.to_dict()
+    d["logged_at"] = _now()
+    return d
+
+
+def decode_trace(d: dict) -> Trace:
+    steps = [
+        Step(
+            node_id=s["node_id"],
+            level=s["level"],
+            action=s["action"],
+            input_hash=s["input_hash"],
+            output=s["output"],
+            judgment=Judgment(s["judgment"]),
+            cost=s["cost"],
+            latency_ms=s["latency_ms"],
+            nondeterministic=s.get("nondeterministic", False),
+        )
+        for s in d.get("steps", [])
+    ]
+    return Trace(
+        task_id=d["task_id"],
+        steps=steps,
+        snapshot_vid=d.get("snapshot_vid", "v0"),
+        verifier_vid=d.get("verifier_vid", "vf0"),
+        outcome=Status(d.get("outcome", "unknown")),
+        attempts=d.get("attempts", 0),
+    )
+
+
+def encode_experience(it: ExperienceItem) -> dict:
+    return {
+        "shot": {
+            "id": it.shot.id,
+            "scene_tag": it.shot.scene_tag,
+            "covers": sorted(it.shot.covers),
+            "text": it.shot.text,
+        },
+        "trace_id": it.trace_id,
+        "snapshot_vid": it.snapshot_vid,
+        "verdict": it.verdict.to_dict(),
+        "logged_at": _now(),
+    }
+
+
+def decode_experience(d: dict) -> ExperienceItem:
+    s = d["shot"]
+    v = d["verdict"]
+    return ExperienceItem(
+        shot=Shot(s["id"], s["scene_tag"], set(s["covers"]), s["text"]),
+        trace_id=d["trace_id"],
+        snapshot_vid=d["snapshot_vid"],
+        verdict=Verdict(Status(v["status"]), Kind(v["kind"]),
+                        float(v["confidence"]), v.get("detail", "")),
+    )
+
+
+# ---------------------------------------------------------------- 存储
+
+class RunStore:
+    """append-only 的落盘层。进程重启后可从文件完整恢复。"""
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root)
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.traces_file = self.root / "traces.jsonl"
+        self.negative_file = self.root / "negative.jsonl"
+        self.experience_file = self.root / "experience.jsonl"
+        # 空文件也创建：下游消费者不必处理「文件不存在」这条路径
+        for p in (self.traces_file, self.negative_file, self.experience_file):
+            p.touch()
+
+    # -- 写
+
+    def append_trace(self, t: Trace) -> None:
+        with self.traces_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(encode_trace(t), ensure_ascii=False) + "\n")
+
+    def append_negative(self, t: Trace, reason: str) -> None:
+        """负证据。契约 §2：内环可写，append-only，不改快照。"""
+        rec = {
+            "task_id": t.task_id,
+            "snapshot_vid": t.snapshot_vid,
+            "verifier_vid": t.verifier_vid,
+            "outcome": t.outcome.value,
+            "reason": reason,
+            "node_ids": [s.node_id for s in t.steps],
+            "input_hashes": sorted({s.input_hash for s in t.steps}),
+            "cost": t.total_cost,
+            "logged_at": _now(),
+        }
+        with self.negative_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    def append_experience(self, it: ExperienceItem) -> None:
+        with self.experience_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(encode_experience(it), ensure_ascii=False) + "\n")
+
+    # -- 读
+
+    def _read(self, p: Path) -> list[dict]:
+        if not p.exists():
+            return []
+        out = []
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                out.append(json.loads(line))
+        return out
+
+    def load_traces(self) -> list[Trace]:
+        return [decode_trace(d) for d in self._read(self.traces_file)]
+
+    def load_negative(self) -> list[dict]:
+        return self._read(self.negative_file)
+
+    def load_experience(self) -> ExperienceStore:
+        store = ExperienceStore()
+        for d in self._read(self.experience_file):
+            store.add(decode_experience(d))
+        return store
+
+    # -- 观测
+
+    def counts(self) -> dict:
+        return {
+            "traces": len(self._read(self.traces_file)),
+            "negative": len(self._read(self.negative_file)),
+            "experience": len(self._read(self.experience_file)),
+        }
+
+
+def replay_verdict(trace: Trace, verifier) -> list[Verdict]:
+    """用当前版本的验证器重判一条历史轨迹。
+
+    契约 §3.2 要求"result 可序列化且能被任意版本验证器重判"。这里演示的正是
+    这条路径：不重跑任务，只读 Step.output 再判一次。验证器升级因此不必重建历史。
+    """
+    out = []
+    for s in trace.steps:
+        if s.action == "rule_hit":
+            out.append(verifier.check(trace.task_id, set(s.output)))
+        else:
+            out.append(verifier.check(trace.task_id, set(s.output)))
+    return out

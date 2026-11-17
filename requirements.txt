@@ -1,0 +1,8 @@
+# MVP 核心（mvp/）只用 Python 标准库，不装任何东西也能跑：
+#     python3 -m mvp
+#
+# 下列依赖仅 tools/ 下的真实数据分析需要（读 parquet + 向量化）：
+numpy>=1.24
+pandas>=2.0
+pyarrow>=12.0
+scikit-learn>=1.3
