@@ -9,7 +9,7 @@
   快照实体   mvp/snapshot.py   不可变清单：验证器版本 + 经验 id + 时效
   复用记录   usage.jsonl       哪条经验被用上、结果如何
   自动晋升   mvp/promotion.py  同一经验 N 次复用全过 → 升成 decisive
-仍缺：RuleMiner（从轨迹挖新经验）、淘汰（过期/长期不用经验的回收）。
+仍缺：候选规则的自动激活、按时间淘汰（只用失败率）、微调。
 
 跑法：python3 -m mvp.demo_dual_loop
 产物：runs/dual-loop-rsi/{traces,negative,experience,usage}.jsonl、snapshots/
@@ -225,7 +225,7 @@ def main() -> None:
           f"经验 {list(snapshots.latest().experience_ids)}，时效 {TTL_DAYS} 天）")
     print(f"  产物 traces {counts['traces']} / experience {counts['experience']} / "
           f"usage {counts['usage']} / negative {counts['negative']}")
-    print("仍缺：RuleMiner（从轨迹挖新经验）、淘汰（过期与长期不用经验的回收）")
+    print("仍缺：候选规则的自动激活、按时间淘汰（只用失败率）、微调")
 
 
 if __name__ == "__main__":

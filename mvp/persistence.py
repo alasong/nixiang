@@ -15,6 +15,7 @@ traces.jsonl      执行轨迹（外环探索 + 内环收敛都写这里）
 negative.jsonl    负证据（失败路径，内环 append-only 写入）
 experience.jsonl  经验条目（带置信分层，外环写、内环只读高置信层）
 usage.jsonl       复用记录（哪条经验被用上、结果如何，晋升与淘汰的依据）
+retired.jsonl     淘汰墓碑（只追加，加载经验库时过滤掉这些 id）
 """
 from __future__ import annotations
 
@@ -104,9 +105,10 @@ class RunStore:
         self.negative_file = self.root / "negative.jsonl"
         self.experience_file = self.root / "experience.jsonl"
         self.usage_file = self.root / "usage.jsonl"
+        self.retire_file = self.root / "retired.jsonl"
         # 空文件也创建：下游消费者不必处理「文件不存在」这条路径
         for p in (self.traces_file, self.negative_file, self.experience_file,
-                  self.usage_file):
+                  self.usage_file, self.retire_file):
             p.touch()
 
     # -- 写
@@ -134,6 +136,12 @@ class RunStore:
     def append_experience(self, it: ExperienceItem) -> None:
         with self.experience_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(encode_experience(it), ensure_ascii=False) + "\n")
+
+    def append_retire(self, shot_ids: list[str], reason: str) -> None:
+        """淘汰墓碑：只追加一条记录，不改历史经验行（append-only 不变）。"""
+        rec = {"shot_ids": sorted(shot_ids), "reason": reason, "logged_at": _now()}
+        with self.retire_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     def append_usage(self, shot_ids: list[str], task_id: str, outcome: str,
                      note: str = "") -> None:
@@ -173,10 +181,19 @@ class RunStore:
     def load_usage(self) -> list[dict]:
         return self._read(self.usage_file)
 
+    def load_retired(self) -> set[str]:
+        return {sid for rec in self._read(self.retire_file)
+                for sid in rec.get("shot_ids", [])}
+
     def load_experience(self) -> ExperienceStore:
+        """加载时过滤掉已淘汰的经验。墓碑是 append-only 的，历史行不动。"""
+        retired = self.load_retired()
         store = ExperienceStore()
         for d in self._read(self.experience_file):
-            store.add(decode_experience(d))
+            item = decode_experience(d)
+            if item.shot.id in retired:
+                continue
+            store.add(item)
         return store
 
     # -- 观测
@@ -187,6 +204,7 @@ class RunStore:
             "negative": len(self._read(self.negative_file)),
             "experience": len(self._read(self.experience_file)),
             "usage": len(self._read(self.usage_file)),
+            "retired": len(self._read(self.retire_file)),
         }
 
 
