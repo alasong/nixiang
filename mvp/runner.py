@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from .budget import Budget, Overdraft
 from .contracts import Judgment, Kind, Status, Step, Trace, Verdict, fingerprint
 from .llm import LLMClient, Shot, SimulatedLLM
 from .paths import RUNS_DIR
@@ -63,18 +64,52 @@ def run_path(
     sink: "RunStore | None" = None,
     name_prefix: str = "",
     llm: LLMClient | None = None,
+    budget: Budget | None = None,
 ) -> PathResult:
-    """跑一条路径。不传 llm 时用仿真模型（默认行为不变）。"""
+    """跑一条路径。不传 llm 时用仿真模型；传 budget 时按契约 §4 记账。
+
+    预算按「任务的最坏情况上界」拦截：一轮任务最多 MAX_ATTEMPTS 次调用，
+    取不够就直接判 unknown（判不了 ≠ 失败），不先花再算。这样禁止透支
+    不靠事后对账。
+    """
     llm = llm or SimulatedLLM(
         truth, seed=SEED, p_base=p_base, p_shot=p_shot,
         base_prompt=base_prompt, shot_cost=shot_cost,
     )
     recorder = Recorder()
 
+    def persist(trace: Trace) -> None:
+        if sink is None:
+            return
+        t = trace
+        if name_prefix:
+            t = Trace(task_id=f"{name_prefix}:{trace.task_id}",
+                      steps=trace.steps, snapshot_vid=trace.snapshot_vid,
+                      verifier_vid=trace.verifier_vid,
+                      outcome=trace.outcome, attempts=trace.attempts)
+        sink.append_trace(t)
+        if t.outcome != Status.PASS:
+            sink.append_negative(t, reason=_why(t))
+
     for task in tasks:
         trace = Trace(task_id=task.id, verifier_vid=verifier.vid)
         shots = store.retrieve(task.scene_tag(), k=2) if use_shots else []
         text = task.render()
+
+        # 契约 §4：先用最坏情况上界拦一道，不够就不开跑
+        if budget is not None:
+            bound = MAX_ATTEMPTS * (base_prompt + shot_cost * len(shots) + 166) \
+                + 2 * retry_overhead
+            if budget.remaining < bound:
+                trace.steps.append(Step(
+                    node_id=f"{task.id}#budget", level=2, action="budget_gate",
+                    input_hash=fingerprint({"remaining": budget.remaining, "need": bound}),
+                    output={"remaining": budget.remaining, "need": bound},
+                    judgment=Judgment.GIVEUP, cost=0, latency_ms=0))
+                trace.outcome = Status.UNKNOWN
+                recorder.add(trace)
+                persist(trace)
+                continue
 
         for attempt in range(1, MAX_ATTEMPTS + 1):
             res = llm.extract(text, shots)
@@ -93,6 +128,8 @@ def run_path(
                 latency_ms=180 + 40 * len(shots),
                 nondeterministic=attempt > 1,   # 契约 §5：重采样即脱确定域
             ))
+            if budget is not None:
+                budget.spend(res.total_tokens + extra)
             trace.attempts = attempt
 
             if verdict.status == Status.PASS:
@@ -104,16 +141,7 @@ def run_path(
             trace.outcome = Status.FAIL
 
         recorder.add(trace)
-        if sink is not None:
-            t = trace
-            if name_prefix:
-                t = Trace(task_id=f"{name_prefix}:{trace.task_id}",
-                          steps=trace.steps, snapshot_vid=trace.snapshot_vid,
-                          verifier_vid=trace.verifier_vid,
-                          outcome=trace.outcome, attempts=trace.attempts)
-            sink.append_trace(t)
-            if t.outcome != Status.PASS:
-                sink.append_negative(t, reason=_why(t))
+        persist(trace)
 
     return PathResult(name, recorder.traces, recorder.stats())
 
