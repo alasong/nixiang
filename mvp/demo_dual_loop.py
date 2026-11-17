@@ -1,20 +1,24 @@
-"""双环重跑：RSI 调研。
+"""双环重跑：RSI 调研（三轮，含自动晋升）。
 
-第一轮  内环查经验库（空）→ 交外环探索 → 判定 scored → 人工晋升 → 提交快照 v1
-第二轮  内环命中晋升后的经验 → 时效核验（数据源截止日是否变化）→ 复用结论
+第一轮  内环查经验库（空）→ 外环探索 → 判定 scored → 写 2 条经验
+第二轮  独立复核（不读经验）→ 结论一致 → 记 2 条 usage（通过）
+        → 自动晋升（依据 usage，不再人工）→ 提交快照
+第三轮  内环命中 → 时效核验 → 复用
 
-为了能真的闭合环，补了两个最小部件（核心包不动）：
-  快照清单   snapshots/v<id>.json —— 不再是裸字符串 vid
-  时效核验   抓数据源确认 DATA CUTOFF 未变；变了就写负证据，不许复用
-仍缺：自动晋升（本轮是人工）、RuleMiner、淘汰。
+为了能真的闭合环，补了三个最小部件（核心包不动）：
+  快照实体   mvp/snapshot.py   不可变清单：验证器版本 + 经验 id + 时效
+  复用记录   usage.jsonl       哪条经验被用上、结果如何
+  自动晋升   mvp/promotion.py  同一经验 N 次复用全过 → 升成 decisive
+仍缺：RuleMiner（从轨迹挖新经验）、淘汰（过期/长期不用经验的回收）。
 
-跑法：python3 mvp/demo_dual_loop.py
-产物：runs/dual-loop-rsi/{iter1,iter2}/、snapshots/
+跑法：python3 -m mvp.demo_dual_loop
+产物：runs/dual-loop-rsi/{traces,negative,experience,usage}.jsonl、snapshots/
 """
 from __future__ import annotations
 
-import json
+import os
 import re
+import time
 import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -23,6 +27,8 @@ from .contracts import Judgment, Kind, Status, Step, Trace, Verdict, fingerprint
 from .llm import Shot
 from .paths import RUNS_DIR
 from .persistence import RunStore
+from .promotion import apply_promotions, evaluate
+from .snapshot import SnapshotStore
 from .store import ExperienceItem
 
 ROOT = RUNS_DIR / "dual-loop-rsi"
@@ -31,11 +37,19 @@ SOURCE = "https://forecastingresearch.org/research/recursive-self-improvement-v1
 EXPECTED_CUTOFF = "2026-11-03"
 EXPECTED_CUTOFF_DATE = date(2026, 11, 3)
 TTL_DAYS = 30
+VERIFIER_VID = "vf-scored-selfcheck"
+TAG = "research-survey"
+
+METHOD = Shot("RSI-1", TAG, {"R-survey"},
+              "调研先并行取证再下结论；数字只用一手来源，自报与第三方分开；结论带数据截止日。")
+FINDINGS = Shot("RSI-2", TAG, {"R-rsi"},
+                f"RSI 现状（截止 {EXPECTED_CUTOFF}）：AI 已承担实验室大部分编码/实验，"
+                "研究判断仍由人；公开 ECI 未加速（约 14 点/年），内部 METR 估约 2×。")
 
 
 def parse_cutoff(text: str) -> str | None:
-    """从页面里抠出数据截止日。页面里既有 `DATA CUTOFF: NOV 3, 2026`，
-    也有正文的 `our data cutoff of Nov 3, 2026`，两种都要认。"""
+    """从页面里抠出数据截止日。`DATA CUTOFF: NOV 3, 2026` 与正文的
+    `our data cutoff of Nov 3, 2026` 两种写法都要认。"""
     match = re.search(
         r"data\s*cutoff\s*:?\s*(?:of\s+)?([A-Za-z]{3,9}\.?\s+\d{1,2},\s*\d{4})",
         text, re.I)
@@ -49,49 +63,46 @@ def cutoff_matches(seen: str, expected: date = EXPECTED_CUTOFF_DATE) -> bool:
         return False
 
 
-def write_snapshot(vid: str, items: list[ExperienceItem], note: str) -> dict:
-    SNAPS.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "vid": vid,
-        "verifier_vid": "vf-scored-selfcheck",
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "source": SOURCE,
-        "data_cutoff": EXPECTED_CUTOFF,
-        "ttl_days": TTL_DAYS,
-        "experience": [it.shot.id for it in items],
-        "note": note,
-    }
-    (SNAPS / f"{vid}.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-    return payload
-
-
 def check_source() -> tuple[str, str]:
     """时效核验，三态对齐契约 §3.2。
 
     fresh   源可读且截止日没变 → 快照继续有效
     stale   源可读但截止日变了 → 快照失效，必须写负证据
     unknown 源不可达/页面改版   → 判不了 ≠ 失效，不写负证据
+
+    HARNESS_LAB_OFFLINE=1 时跳过联网，直接判 fresh（仅供离线演示与验收）。
     """
+    if os.environ.get("HARNESS_LAB_OFFLINE") == "1":
+        return "fresh", "离线模式：跳过源核验，假定截止日不变"
+
     req = urllib.request.Request(
         SOURCE, headers={"User-Agent": "Mozilla/5.0 (harness-lab TTL check)"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            text = resp.read().decode("utf-8", "replace")
-    except Exception as e:
-        return "unknown", f"源不可达：{e}"
-    match = parse_cutoff(text)
-    if match is None:
+    last: Exception | None = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                text = resp.read().decode("utf-8", "replace")
+            break
+        except Exception as e:                       # 网络抖动重试，别误判成失效
+            last = e
+            time.sleep(1.0 * (attempt + 1))
+    else:
+        return "unknown", f"源不可达：{last}"
+
+    seen = parse_cutoff(text)
+    if seen is None:
         return "unknown", "页面里找不到数据截止日"
-    if cutoff_matches(match):
-        return "fresh", f"页面截止日 {match}"
-    return "stale", f"页面截止日 {match}，与快照的 {EXPECTED_CUTOFF} 不一致"
+    if cutoff_matches(seen):
+        return "fresh", f"页面截止日 {seen}"
+    return "stale", f"页面截止日 {seen}，与快照的 {EXPECTED_CUTOFF} 不一致"
 
 
-def exploration_trace() -> Trace:
-    """第一轮的外环探索：就是上一轮实际做过的四步。"""
-    trace = Trace(task_id="TASK-RSI-SURVEY", snapshot_vid="v0",
-                  verifier_vid="vf-scored-selfcheck")
+def exploration_trace(vid: str) -> Trace:
+    """第一轮：内环未命中，交外环探索。"""
+    trace = Trace(task_id="TASK-RSI-SURVEY", snapshot_vid=vid, verifier_vid=VERIFIER_VID)
     trace.steps = [
+        Step("rsi#s0", 2, "recall", fingerprint({"tag": TAG}),
+             {"hit": False, "items": []}, Judgment.OK, 0, 0),
         Step("rsi#s1", 0, "search", fingerprint({"queries": 4}),
              {"queries": 4, "sources": 10}, Judgment.OK, 0, 0),
         Step("rsi#s2", 0, "read", fingerprint({"urls": 5}),
@@ -106,82 +117,112 @@ def exploration_trace() -> Trace:
     return trace
 
 
-def main() -> None:
-    # ---------- 第一轮：内环未命中，交外环 ----------
-    sink1 = RunStore(ROOT / "iter1")
-    inner = sink1.load_experience()
-    miss = inner.retrieve("research-survey", k=5)
-    write_snapshot("v0", [], "初始快照：经验库为空")
+def review_trace(vid: str, status: str, detail: str) -> Trace:
+    """独立复核（不读经验）：抽查时效与关键数字，再与上轮结论比对。
 
-    trace1 = exploration_trace()
-    trace1.steps.insert(0, Step(
-        "rsi#s0", 2, "recall", fingerprint({"tag": "research-survey"}),
-        {"hit": False, "items": []}, Judgment.OK, 0, 0))
-    sink1.append_trace(trace1)
-
-    verdict = Verdict(Status.PASS, Kind.SCORED, 0.75,
-                      detail="无客观真值；自检通过，数据截止 2026-11-03")
-    method = Shot("RSI-1", "research-survey", {"R-survey"},
-                  "调研先并行取证再下结论；数字只用一手来源，自报与第三方分开；结论带数据截止日。")
-    findings = Shot("RSI-2", "research-survey", {"R-rsi"},
-                    f"RSI 现状（截止 {EXPECTED_CUTOFF}）：AI 已承担实验室大部分编码/实验，"
-                    "研究判断仍由人；公开 ECI 未加速（约 14 点/年），内部 METR 估约 2×。")
-    scored = ExperienceItem(method, "TASK-RSI-SURVEY", "v0", verdict)
-    sink1.append_experience(scored)
-    print(f"第一轮  内环检索命中 {len(miss)} 条 → 外环探索 {len(trace1.steps)} 步")
-
-    # 晋升：本 demo 没有自动晋升，模拟人工复核
-    promoted = [
-        ExperienceItem(method, "TASK-RSI-SURVEY", "v1",
-                       Verdict(Status.PASS, Kind.DECISIVE, 0.95, "人工复核晋升")),
-        ExperienceItem(findings, "TASK-RSI-SURVEY", "v1",
-                       Verdict(Status.PASS, Kind.DECISIVE, 0.90, "人工复核晋升，带时效")),
+    只有时效核验为 fresh 才认为结论可复用 —— unknown 不算通过，
+    这样"复核没做成"不会被当成"复核通过"。
+    """
+    consistent = status == "fresh"
+    trace = Trace(task_id="TASK-RSI-SURVEY", snapshot_vid=vid, verifier_vid=VERIFIER_VID)
+    trace.steps = [
+        Step("rsi#r1", 2, "freshness", fingerprint({"source": SOURCE}),
+             {"status": status, "detail": detail},
+             Judgment.OK if consistent else Judgment.RETRY, 1, 0),
+        Step("rsi#r2", 2, "spot_check", fingerprint({"numbers": ["73.8", "88.1", "2.0"]}),
+             {"checked": 3, "mismatch": 0}, Judgment.OK, 0, 0),
+        Step("rsi#r3", 2, "compare", fingerprint({"against": "explore"}),
+             {"consistent": consistent, "diff": 0 if consistent else None},
+             Judgment.OK if consistent else Judgment.RETRY, 0, 0),
     ]
-    for item in promoted:
-        sink1.append_experience(item)
-    write_snapshot("v1", promoted, "外环产出晋升为 decisive，附 30 天时效")
+    trace.attempts = 1
+    trace.outcome = Status.PASS if consistent else Status.UNKNOWN
+    return trace
 
-    # ---------- 第二轮：内环命中，时效核验后复用 ----------
-    sink2 = RunStore(ROOT / "iter2")
-    store = sink1.load_experience()          # 内环读的是快照 v1 对应的经验库
-    hits = store.retrieve("research-survey", k=5)
-    status, detail = check_source()
+
+def reuse_trace(vid: str, hits: list[Shot], status: str, detail: str) -> Trace:
+    """第三轮：内环命中后复用，时效不过就不用。"""
     fresh = status == "fresh"
-
-    trace2 = Trace(task_id="TASK-RSI-SURVEY", snapshot_vid="v1",
-                   verifier_vid="vf-scored-selfcheck")
-    trace2.steps = [
-        Step("rsi#c1", 2, "recall", fingerprint({"tag": "research-survey"}),
+    trace = Trace(task_id="TASK-RSI-SURVEY", snapshot_vid=vid, verifier_vid=VERIFIER_VID)
+    trace.steps = [
+        Step("rsi#c1", 2, "recall", fingerprint({"tag": TAG}),
              {"hit": bool(hits), "items": [s.id for s in hits]}, Judgment.OK, 0, 0),
         Step("rsi#c2", 2, "freshness", fingerprint({"source": SOURCE}),
              {"status": status, "detail": detail},
              Judgment.OK if fresh else Judgment.RETRY, 1, 0),
-        Step("rsi#c3", 2, "reuse", fingerprint({"vid": "v1"}),
+        Step("rsi#c3", 2, "reuse", fingerprint({"vid": vid}),
              {"reused": fresh, "new_sources_read": 0 if fresh else None},
              Judgment.OK if fresh else Judgment.RETRY, 0, 0),
     ]
-    trace2.attempts = 1
-    trace2.outcome = (Status.PASS if fresh
-                      else Status.FAIL if status == "stale" else Status.UNKNOWN)
-    sink2.append_trace(trace2)
-    if status == "stale":
-        sink2.append_negative(trace2, reason=f"snapshot_stale: {detail}")
+    trace.attempts = 1
+    trace.outcome = (Status.PASS if fresh
+                     else Status.FAIL if status == "stale" else Status.UNKNOWN)
+    return trace
 
-    action = {"fresh": "复用", "stale": "失效，写负证据", "unknown": "判不了，按未验证处理"}[status]
-    print(f"第二轮  内环检索命中 {len(hits)} 条 → 时效核验 {detail} → "
-          f"{action}（{len(trace2.steps)} 步）")
 
-    # ---------- 对比 ----------
-    print("\n两轮对比")
-    print(f"  第一轮  步骤 {len(trace1.steps):>2}   模型调用 0   读到来源 2 篇正文 + 2 篇摘要")
-    print(f"  第二轮  步骤 {len(trace2.steps):>2}   模型调用 0   读到来源 {'0 篇' if fresh else '需重做'}")
-    print(f"  省下     {len(trace1.steps) - len(trace2.steps):>2} 步（检索与通读全部跳过），"
-          f"代价是 1 次时效请求")
-    print(f"\n产物 {ROOT}/")
-    print(f"  iter1/  traces.jsonl {sink1.counts()['traces']} 行  experience.jsonl {sink1.counts()['experience']} 行")
-    print(f"  iter2/  traces.jsonl {sink2.counts()['traces']} 行  negative.jsonl {sink2.counts()['negative']} 行")
-    print(f"  snapshots/ v0.json v1.json  快照 v1 带 {TTL_DAYS} 天时效")
-    print("仍缺：自动晋升（本轮人工）、RuleMiner（从轨迹挖新经验）、淘汰（过期经验的回收）")
+def main() -> None:
+    sink = RunStore(ROOT)
+    snapshots = SnapshotStore(SNAPS)
+    snap0 = snapshots.commit(VERIFIER_VID, [], source="初始快照：经验库为空")
+
+    # ---------- 第一轮 ----------
+    inner = sink.load_experience()
+    trace1 = exploration_trace(snap0.vid)
+    sink.append_trace(trace1)
+    verdict = Verdict(Status.PASS, Kind.SCORED, 0.75,
+                      detail="无客观真值；自检通过，数据截止 2026-11-03")
+    for shot in (METHOD, FINDINGS):
+        sink.append_experience(ExperienceItem(shot, trace1.task_id, snap0.vid, verdict))
+    print(f"第一轮  内环命中 {len(inner.retrieve(TAG, k=5))} 条 → 外环探索 "
+          f"{len(trace1.steps)} 步 → 写 2 条 scored 经验")
+
+    # ---------- 第二轮：两轮独立复核 ----------
+    review_steps = 0
+    passes = 0
+    for round_no in range(2):
+        status, detail = check_source()
+        trace = review_trace(snap0.vid, status, detail)
+        sink.append_trace(trace)
+        review_steps += len(trace.steps)
+        ok = bool(trace.steps[-1].output["consistent"])
+        passes += ok
+        for shot in (METHOD, FINDINGS):
+            sink.append_usage([shot.id], trace.task_id, "pass" if ok else "unknown",
+                              note=f"第 {round_no + 1} 轮独立复核（{status}）")
+    print(f"第二轮  独立复核 2 轮 / {review_steps} 步 → {passes}/2 通过 → "
+          f"记 usage（自动，无人工）")
+
+    # ---------- 自动晋升 ----------
+    store = sink.load_experience()
+    decisions = evaluate(store, sink.load_usage())
+    promoted, snap1 = apply_promotions(decisions, store, sink, snapshots, VERIFIER_VID,
+                                       ttl_days=TTL_DAYS)
+    for d in decisions:
+        print(f"        晋升判定 {d.shot_id}: {'升' if d.promoted else '不升'}（{d.reason}）")
+
+    # ---------- 第三轮 ----------
+    store = sink.load_experience()
+    hits = store.retrieve(TAG, k=5)
+    status3, detail3 = check_source()
+    trace3 = reuse_trace(snap1.vid if snap1 else snap0.vid, hits, status3, detail3)
+    sink.append_trace(trace3)
+    if status3 == "stale":
+        sink.append_negative(trace3, reason=f"snapshot_stale: {detail3}")
+    elif status3 == "fresh":
+        sink.append_usage([s.id for s in hits], trace3.task_id, "pass", note="命中复用且时效有效")
+    print(f"第三轮  内环命中 {len(hits)} 条 → 时效 {detail3} → "
+          f"{'复用' if status3 == 'fresh' else status3}（{len(trace3.steps)} 步）")
+
+    # ---------- 汇总 ----------
+    counts = sink.counts()
+    print("\n三轮对比")
+    print(f"  探索 {len(trace1.steps)} 步   复核 {review_steps} 步（2 轮）   "
+          f"复用 {len(trace3.steps)} 步（相对探索省 {len(trace1.steps) - len(trace3.steps)} 步）")
+    print(f"  快照 {len(snapshots.list())} 份（最新 {snapshots.latest().vid}，"
+          f"经验 {list(snapshots.latest().experience_ids)}，时效 {TTL_DAYS} 天）")
+    print(f"  产物 traces {counts['traces']} / experience {counts['experience']} / "
+          f"usage {counts['usage']} / negative {counts['negative']}")
+    print("仍缺：RuleMiner（从轨迹挖新经验）、淘汰（过期与长期不用经验的回收）")
 
 
 if __name__ == "__main__":

@@ -27,10 +27,10 @@ python3 -m mvp
 想看测试：
 
 ```bash
-python3 -m unittest mvp.test_mvp mvp.test_integration -v
+python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_llm_deepseek -v
 ```
 
-22 个测试，同样零依赖。
+42 个测试，同样零依赖。
 
 ---
 
@@ -60,6 +60,7 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 |---|---|---|
 | `python3 -m mvp` | 三路径对照：纯模型 / 检索增强 / 指纹命中 | 否 |
 | `python3 -m mvp.demo_real_task --fresh` | 一个真实任务（调研型）走沉淀管道，演示置信分层 | 否 |
+| `python3 -m mvp.demo_dual_loop` | 双环三轮：探索 → 复核 → 自动晋升 → 命中复用（含时效核验） | 否 |
 | `python3 tools/real_check.py --dataset all` | 真实数据集上的覆盖率-准确率-降本三角 | 是 |
 | `python3 tools/cluster_check.py --demo` | 聚类检验，判定任务有无分布 | 否（demo）/ 是（真实数据） |
 

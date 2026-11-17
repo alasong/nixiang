@@ -14,6 +14,7 @@
 traces.jsonl      执行轨迹（外环探索 + 内环收敛都写这里）
 negative.jsonl    负证据（失败路径，内环 append-only 写入）
 experience.jsonl  经验条目（带置信分层，外环写、内环只读高置信层）
+usage.jsonl       复用记录（哪条经验被用上、结果如何，晋升与淘汰的依据）
 """
 from __future__ import annotations
 
@@ -102,8 +103,10 @@ class RunStore:
         self.traces_file = self.root / "traces.jsonl"
         self.negative_file = self.root / "negative.jsonl"
         self.experience_file = self.root / "experience.jsonl"
+        self.usage_file = self.root / "usage.jsonl"
         # 空文件也创建：下游消费者不必处理「文件不存在」这条路径
-        for p in (self.traces_file, self.negative_file, self.experience_file):
+        for p in (self.traces_file, self.negative_file, self.experience_file,
+                  self.usage_file):
             p.touch()
 
     # -- 写
@@ -132,6 +135,23 @@ class RunStore:
         with self.experience_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(encode_experience(it), ensure_ascii=False) + "\n")
 
+    def append_usage(self, shot_ids: list[str], task_id: str, outcome: str,
+                     note: str = "") -> None:
+        """记一次复用：哪几条经验被用上、结果如何。
+
+        契约里没有这张表，但晋升与淘汰都需要它 —— 没有使用记录，经验库里
+        的条目永远是「写进去时什么样，以后还是什么样」。
+        """
+        rec = {
+            "shot_ids": sorted(shot_ids),
+            "task_id": task_id,
+            "outcome": outcome,
+            "note": note,
+            "logged_at": _now(),
+        }
+        with self.usage_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
     # -- 读
 
     def _read(self, p: Path) -> list[dict]:
@@ -150,6 +170,9 @@ class RunStore:
     def load_negative(self) -> list[dict]:
         return self._read(self.negative_file)
 
+    def load_usage(self) -> list[dict]:
+        return self._read(self.usage_file)
+
     def load_experience(self) -> ExperienceStore:
         store = ExperienceStore()
         for d in self._read(self.experience_file):
@@ -163,6 +186,7 @@ class RunStore:
             "traces": len(self._read(self.traces_file)),
             "negative": len(self._read(self.negative_file)),
             "experience": len(self._read(self.experience_file)),
+            "usage": len(self._read(self.usage_file)),
         }
 
 
