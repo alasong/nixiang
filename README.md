@@ -27,10 +27,10 @@ python3 -m mvp
 想看测试：
 
 ```bash
-python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_llm_deepseek -v
+python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_llm_deepseek -v
 ```
 
-58 个测试，同样零依赖。
+67 个测试，同样零依赖。
 
 ---
 
@@ -85,17 +85,29 @@ python3 tools/real_llm_check.py --n 20
 mvp/                 核心实验（纯标准库）
   contracts.py       数据结构：Trace / Step / Verdict / Goal
   tasks.py           报销判定域 + 真值规则引擎（合成任务）
-  llm.py             模型接口 + 仿真实现（换真实 API 只改这一个类）
+  rules.py           规则库：7 条规则变成 AND-OR 条件树
+  backward.py        逆向推理：三态求值 + 短路 + 确定否定
+  llm.py             模型接口 + 仿真实现
+  llm_deepseek.py    DeepSeek 真实 API 适配器
   verifier.py        判定型验证器
   store.py           经验库 + 记录器
-  persistence.py     三类 append-only 产物落盘
+  persistence.py     四类 append-only 产物（含 usage）
+  snapshot.py        快照实体（验证器版本 + 经验 id + 时效）
+  promotion.py       自动晋升（按复用记录，不再人工拍置信度）
+  evaluator.py       留出集评估 + §6.4 判红门
+  router.py          只读聚合统计的路由决策
+  sentry.py          渐进失效探针（只报警，不改数据）
   runner.py          三路径对照 + 敏感性分析
   paths.py           路径解析（不依赖 cwd）
-  test_mvp.py        15 个单测
-  test_integration.py  7 个端到端测试（含"验证器升级后重判"）
+  demo_real_task.py  调研任务沉淀演示
+  demo_dual_loop.py  双环三轮演示（探索 → 复核 → 晋升 → 复用）
+  route_and_sentry.py 路由与哨兵演示
+  test_*.py          67 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
+  real_c_check.py    C 路径真实化（真实答案索引 + 真实模型补未命中）
+  real_llm_check.py  真实 API 的 A/B 对照
   cluster_check.py   H1 聚类检验
 
 data/                700KB 公开数据集，已内置，可离线
