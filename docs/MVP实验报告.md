@@ -159,4 +159,4 @@ B 的质量确实提升了（+10pp），但成本涨得更多——**用更长�
 | `mvp/test_mvp.py` | 15 个单元测试，全通过 |
 | `tools/cluster_check.py` | H1 聚类检验工具 |
 
-复现：`python3 -m mvp.runner` ／ `python3 -m unittest mvp.test_mvp -v` ／ `python3 tools/cluster_check.py --demo`
+复现：`python3 -m mvp.loop.runner` ／ `python3 -m unittest mvp.tests.test_mvp -v` ／ `python3 tools/cluster_check.py --demo`

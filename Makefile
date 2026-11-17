@@ -16,7 +16,7 @@ setup:
 	./bootstrap.sh
 
 test:
-	$(PY) -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_backward_properties mvp.test_budget mvp.test_budget_runner mvp.test_miner mvp.test_scenarios mvp.test_subgoal mvp.test_retire mvp.test_maintenance mvp.test_self_bootstrap mvp.test_e2e mvp.test_names_resolution mvp.test_doccheck mvp.test_llm_deepseek -v
+	$(PY) -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek -v
 
 docs-check:
 	$(PY) tools/check_docs.py

@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mvp.llm_deepseek import DeepSeekLLM          # noqa: E402
+from mvp.core.llm_deepseek import DeepSeekLLM          # noqa: E402
 from real_check import load_banking77, topk, vectorize  # noqa: E402  复用同一套检索
 
 HIT_COST = 10      # 命中成本：一次哈希/查表，沿用仓库口径
@@ -81,7 +81,7 @@ def main() -> None:
         print("缺少 DEEPSEEK_API_KEY：\n    export DEEPSEEK_API_KEY=sk-...", file=sys.stderr)
         raise SystemExit(2)
 
-    from mvp.datasets import b77_readme
+    from mvp.core.datasets import b77_readme
 
     names_path = Path(args.names) if args.names else b77_readme()
     if not names_path.exists():

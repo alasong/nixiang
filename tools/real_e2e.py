@@ -23,11 +23,11 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from mvp.contracts import Judgment, Status, Step, Trace  # noqa: E402
-from mvp.maintenance import run_maintenance  # noqa: E402
-from mvp.paths import RUNS_DIR  # noqa: E402
-from mvp.persistence import RunStore  # noqa: E402
-from mvp.snapshot import SnapshotStore  # noqa: E402
+from mvp.core.contracts import Judgment, Status, Step, Trace  # noqa: E402
+from mvp.loop.maintenance import run_maintenance  # noqa: E402
+from mvp.core.paths import RUNS_DIR  # noqa: E402
+from mvp.core.persistence import RunStore  # noqa: E402
+from mvp.core.snapshot import SnapshotStore  # noqa: E402
 
 HIT_COST = 10
 MODEL_COST = 583        # 前次真实 API 实测（deepseek-chat，77 类目录）参考值
@@ -74,7 +74,7 @@ def main() -> None:
     names_path = Path(args.names) if args.names else None
     if names_path is None:
         try:
-            from mvp.datasets import b77_readme
+            from mvp.core.datasets import b77_readme
             names_path = b77_readme()
         except Exception as exc:              # 离线也不阻塞，退回细粒度
             print(f"提示：自动获取类别名失败（{exc}），改用细粒度标签")
@@ -142,7 +142,7 @@ def main() -> None:
 
     # H1：标签口径 + 聚类口径
     label_h1 = family_tool.summarize(family_items)
-    from mvp.self_bootstrap import collect_tasks
+    from mvp.loop.self_bootstrap import collect_tasks
     exported = collect_tasks([run_dir / "traces.jsonl"])
     cluster_h1 = _load("cluster_check", ROOT / "tools" / "cluster_check.py").report(
         exported, args.threshold) if exported else {"h1_ok": False, "verdict": "无任务"}

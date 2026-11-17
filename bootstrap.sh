@@ -42,7 +42,7 @@ else
 fi
 
 echo "==> 运行测试"
-python -m unittest mvp.test_mvp mvp.test_integration
+python -m unittest mvp.tests.test_mvp mvp.tests.test_integration
 
 echo "==> 运行三路径对照实验"
 python -m mvp

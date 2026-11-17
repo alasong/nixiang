@@ -27,7 +27,7 @@ python3 -m mvp
 想看测试：
 
 ```bash
-python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_backward_properties mvp.test_budget mvp.test_budget_runner mvp.test_miner mvp.test_scenarios mvp.test_subgoal mvp.test_retire mvp.test_maintenance mvp.test_llm_deepseek -v
+python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_llm_deepseek -v
 ```
 
 131 个测试，同样零依赖。
@@ -59,16 +59,16 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 | 命令 | 做什么 | 要依赖吗 |
 |---|---|---|
 | `python3 -m mvp` | 三路径对照：纯模型 / 检索增强 / 指纹命中 | 否 |
-| `python3 -m mvp.demo_real_task --fresh` | 一个真实任务（调研型）走沉淀管道，演示置信分层 | 否 |
-| `python3 -m mvp.demo_dual_loop` | 双环三轮：探索 → 复核 → 自动晋升 → 命中复用（含时效核验） | 否 |
-| `python3 -m mvp.backward --demo` | 逆向推理：AND-OR 展开、三态求值、部分信息下的确定否定 | 否 |
-| `python3 -m mvp.evaluator` | 留出集评估：经验与索引只用训练段，按 §6.4 判红 | 否 |
-| `python3 -m mvp.route_and_sentry --demo` | 路由决策 + 哨兵巡检（演示目录里埋了四类问题） | 否 |
-| `python3 -m mvp.miner --demo` | 从负证据挖候选短路规则（support / counter） | 否 |
-| `python3 -m mvp.budget --demo` | 预算切分与守恒（禁止透支、未用归还） | 否 |
-| `python3 -m mvp.maintenance --demo` | 维护回路：巡检 → 晋升 → 淘汰 → 路由（`--dir` 可重复跑） | 否 |
-| `python3 -m mvp.self_bootstrap --demo` | 从自身轨迹导出任务清单并跑 H1 聚类（不依赖人手写） | 否 |
-| `python3 -m mvp.e2e` | 端到端回路：跑任务 → 自举 → H1 → 判红 → 维护（无人工步骤） | 否 |
+| `python3 -m mvp.demos.demo_real_task --fresh` | 一个真实任务（调研型）走沉淀管道，演示置信分层 | 否 |
+| `python3 -m mvp.demos.demo_dual_loop` | 双环三轮：探索 → 复核 → 自动晋升 → 命中复用（含时效核验） | 否 |
+| `python3 -m mvp.loop.backward --demo` | 逆向推理：AND-OR 展开、三态求值、部分信息下的确定否定 | 否 |
+| `python3 -m mvp.loop.evaluator` | 留出集评估：经验与索引只用训练段，按 §6.4 判红 | 否 |
+| `python3 -m mvp.demos.route_and_sentry --demo` | 路由决策 + 哨兵巡检（演示目录里埋了四类问题） | 否 |
+| `python3 -m mvp.loop.miner --demo` | 从负证据挖候选短路规则（support / counter） | 否 |
+| `python3 -m mvp.loop.budget --demo` | 预算切分与守恒（禁止透支、未用归还） | 否 |
+| `python3 -m mvp.loop.maintenance --demo` | 维护回路：巡检 → 晋升 → 淘汰 → 路由（`--dir` 可重复跑） | 否 |
+| `python3 -m mvp.loop.self_bootstrap --demo` | 从自身轨迹导出任务清单并跑 H1 聚类（不依赖人手写） | 否 |
+| `python3 -m mvp.demos.e2e` | 端到端回路：跑任务 → 自举 → H1 → 判红 → 维护（无人工步骤） | 否 |
 | `python3 tools/h1_sweep.py --dataset banking77 --n 200 --seeds 0,1,2,3` | H1 阈值扫描 + 多抽样稳定性 | 是（读 parquet） |
 | `python3 tools/family_stats.py --jsonl tasks.jsonl` | 按族标签直接统计分布（比聚类稳） | 否（jsonl）/ 是（banking77） |
 | `.venv/bin/python tools/real_e2e.py --names /tmp/b77_readme.md` | 真实数据端到端：轨迹 + 两种 H1 + 巡检 + 混合成本 | 是（读 parquet） |
@@ -91,35 +91,40 @@ python3 tools/real_llm_check.py --n 20
 ## 目录
 
 ```
-mvp/                 核心实验（纯标准库）
-  contracts.py       数据结构：Trace / Step / Verdict / Goal
-  tasks.py           报销判定域 + 真值规则引擎（合成任务）
-  rules.py           规则库：7 条规则变成 AND-OR 条件树
-  backward.py        逆向推理：三态求值 + 短路 + 确定否定
-  llm.py             模型接口 + 仿真实现
-  llm_deepseek.py    DeepSeek 真实 API 适配器
-  verifier.py        判定型验证器
-  store.py           经验库 + 记录器
-  persistence.py     五类 append-only 产物（含 usage / retired）
-  snapshot.py        快照实体（验证器版本 + 经验 id + 时效）
-  promotion.py       自动晋升（按复用记录，不再人工拍置信度）
-  retire.py          淘汰（失败率 / 长期未用，append-only 墓碑）
-  subgoal.py         L1 子目标：局部重分解，用尽才交棒
-  budget.py          预算守恒（禁止透支、未用归还）
-  miner.py           从负证据挖候选短路规则
-  maintenance.py     维护回路：巡检 → 晋升 → 淘汰 → 路由
-  self_bootstrap.py  从轨迹导出任务清单并跑 H1（不依赖人手写）
-  e2e.py             端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
-  evaluator.py       留出集评估 + §6.4 判红门
-  router.py          只读聚合统计的路由决策
-  sentry.py          渐进失效探针（只报警，不改数据）
-  runner.py          三路径对照 + 敏感性分析（可接预算）
-  datasets.py        数据集附带文件定位 + 下载缓存（说明文件不再随仓库走）
-  paths.py           路径解析（不依赖 cwd）
-  demo_real_task.py  调研任务沉淀演示
-  demo_dual_loop.py  双环三轮演示（探索 → 复核 → 晋升 → 复用）
-  route_and_sentry.py 路由与哨兵演示
-  test_*.py          131 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向 / 契约场景）
+mvp/                 核心实验（纯标准库，按职责分包）
+  __main__.py        python3 -m mvp 的入口
+  core/              领域与存储层
+    contracts.py     数据结构：Trace / Step / Verdict / Goal
+    tasks.py         报销判定域 + 真值规则引擎（合成任务）
+    rules.py         规则库：7 条规则变成 AND-OR 条件树
+    verifier.py      判定型验证器
+    llm.py           模型接口 + 仿真实现
+    llm_deepseek.py  DeepSeek 真实 API 适配器
+    store.py         经验库 + 记录器
+    persistence.py   五类 append-only 产物（含 usage / retired）
+    snapshot.py      快照实体（验证器版本 + 经验 id + 时效）
+    datasets.py      数据集附带文件定位 + 下载缓存
+    paths.py         路径解析（不依赖 cwd）
+  loop/              双环运行层
+    runner.py        三路径对照 + 敏感性分析（可接预算）
+    backward.py      逆向推理：三态求值 + 短路 + 确定否定
+    subgoal.py       L1 子目标：局部重分解，用尽才交棒
+    budget.py        预算守恒（禁止透支、未用归还）
+    evaluator.py     留出集评估 + §6.4 判红门
+    router.py        只读聚合统计的路由决策
+    sentry.py        渐进失效探针（只报警，不改数据）
+    promotion.py     自动晋升（按复用记录）
+    retire.py        淘汰（失败率 / 长期未用，append-only 墓碑）
+    miner.py         从负证据挖候选短路规则
+    maintenance.py   维护回路：巡检 → 晋升 → 淘汰 → 路由
+    self_bootstrap.py 从轨迹导出任务清单并跑 H1（不依赖人手写）
+    doccheck.py      README 与代码一致性检查
+  demos/             可运行演示
+    demo_real_task.py 调研任务沉淀演示
+    demo_dual_loop.py 双环三轮演示（探索 → 复核 → 晋升 → 复用）
+    route_and_sentry.py 路由与哨兵演示
+    e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
+  tests/             131 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）

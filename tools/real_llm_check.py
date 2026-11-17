@@ -19,12 +19,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from mvp.contracts import Status
-from mvp.llm import SimulatedLLM
-from mvp.llm_deepseek import DeepSeekLLM
-from mvp.runner import build_experience, compare, run_path
-from mvp.tasks import build_tasks, ground_truth, structural_key
-from mvp.verifier import SetMatchVerifier
+from mvp.core.contracts import Status
+from mvp.core.llm import SimulatedLLM
+from mvp.core.llm_deepseek import DeepSeekLLM
+from mvp.loop.runner import build_experience, compare, run_path
+from mvp.core.tasks import build_tasks, ground_truth, structural_key
+from mvp.core.verifier import SetMatchVerifier
 
 
 def _report(result, client) -> None:

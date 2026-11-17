@@ -29,7 +29,7 @@ from sklearn.preprocessing import normalize
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from mvp.datasets import b77_names as _b77_names  # noqa: E402
+from mvp.core.datasets import b77_names as _b77_names  # noqa: E402
 
 DATA = ROOT / "data"
 
