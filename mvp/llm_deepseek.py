@@ -150,13 +150,18 @@ class DeepSeekLLM(LLMClient):
                 raise DeepSeekError(f"网络错误: {e}") from e
         raise DeepSeekError(f"重试后仍失败: {last}")
 
-    def extract(self, text: str, shots: list[Shot]) -> LLMResult:
+    def chat(self, messages: list[dict[str, str]],
+             max_tokens: int | None = None) -> tuple[str, int, int]:
+        """发一次对话，返回 (文本, prompt_tokens, completion_tokens)。
+
+        通用入口：不绑定差旅报销任务，供其他域的脚本复用同一套重试与计数。
+        """
         self.require_key()
         payload = {
             "model": self.model,
-            "messages": build_messages(text, shots),
+            "messages": messages,
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens or self.max_tokens,
             "stream": False,
         }
         started = time.monotonic()
@@ -169,15 +174,17 @@ class DeepSeekLLM(LLMClient):
         except (KeyError, IndexError, TypeError) as e:
             raise DeepSeekError(f"响应结构异常: {str(data)[:300]}") from e
 
+        usage = data.get("usage") or {}
+        return (content,
+                int(usage.get("prompt_tokens") or 0),
+                int(usage.get("completion_tokens") or 0))
+
+    def extract(self, text: str, shots: list[Shot]) -> LLMResult:
+        content, prompt_tokens, output_tokens = self.chat(build_messages(text, shots))
         rules, unknown, ok = parse_rules(content)
         if not ok:
             self.parse_errors += 1
         if unknown:
             self.unknown_codes.extend(unknown)
-
-        usage = data.get("usage") or {}
-        return LLMResult(
-            rules=rules,
-            prompt_tokens=int(usage.get("prompt_tokens") or 0),
-            output_tokens=int(usage.get("completion_tokens") or 0),
-        )
+        return LLMResult(rules=rules, prompt_tokens=prompt_tokens,
+                         output_tokens=output_tokens)
