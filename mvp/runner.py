@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .contracts import Judgment, Kind, Status, Step, Trace, Verdict, fingerprint
-from .llm import Shot, SimulatedLLM
+from .llm import LLMClient, Shot, SimulatedLLM
 from .paths import RUNS_DIR
 from .persistence import RunStore
 from .store import ExperienceStore, ExperienceItem, Recorder
@@ -62,8 +62,10 @@ def run_path(
     retry_overhead: int = 0,
     sink: "RunStore | None" = None,
     name_prefix: str = "",
+    llm: LLMClient | None = None,
 ) -> PathResult:
-    llm = SimulatedLLM(
+    """跑一条路径。不传 llm 时用仿真模型（默认行为不变）。"""
+    llm = llm or SimulatedLLM(
         truth, seed=SEED, p_base=p_base, p_shot=p_shot,
         base_prompt=base_prompt, shot_cost=shot_cost,
     )

@@ -65,6 +65,15 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 
 `make help` 有同样的清单。
 
+**接真实模型**（把上面的仿真换成 DeepSeek 真实调用）：
+
+```bash
+export DEEPSEEK_API_KEY=sk-...
+python3 tools/real_llm_check.py --n 20
+```
+
+成本取 API 返回的 `usage`，成功率仍由同一套验证器判定。适配器在 `mvp/llm_deepseek.py`，只用标准库；缺 key 时以退出码 2 报错。
+
 ---
 
 ## 目录
