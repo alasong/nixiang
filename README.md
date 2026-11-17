@@ -61,6 +61,7 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 | `python3 -m mvp` | 三路径对照：纯模型 / 检索增强 / 指纹命中 | 否 |
 | `python3 -m mvp.demo_real_task --fresh` | 一个真实任务（调研型）走沉淀管道，演示置信分层 | 否 |
 | `python3 -m mvp.demo_dual_loop` | 双环三轮：探索 → 复核 → 自动晋升 → 命中复用（含时效核验） | 否 |
+| `python3 -m mvp.backward --demo` | 逆向推理：AND-OR 展开、三态求值、部分信息下的确定否定 | 否 |
 | `python3 -m mvp.evaluator` | 留出集评估：经验与索引只用训练段，按 §6.4 判红 | 否 |
 | `python3 -m mvp.route_and_sentry --demo` | 路由决策 + 哨兵巡检（演示目录里埋了四类问题） | 否 |
 | `python3 -m mvp.miner --demo` | 从负证据挖候选短路规则（support / counter） | 否 |
@@ -94,13 +95,18 @@ mvp/                 核心实验（纯标准库）
   llm_deepseek.py    DeepSeek 真实 API 适配器
   verifier.py        判定型验证器
   store.py           经验库 + 记录器
-  persistence.py     四类 append-only 产物（含 usage）
+  persistence.py     五类 append-only 产物（含 usage / retired）
   snapshot.py        快照实体（验证器版本 + 经验 id + 时效）
   promotion.py       自动晋升（按复用记录，不再人工拍置信度）
+  retire.py          淘汰（失败率 / 长期未用，append-only 墓碑）
+  subgoal.py         L1 子目标：局部重分解，用尽才交棒
+  budget.py          预算守恒（禁止透支、未用归还）
+  miner.py           从负证据挖候选短路规则
+  maintenance.py     维护回路：巡检 → 晋升 → 淘汰 → 路由
   evaluator.py       留出集评估 + §6.4 判红门
   router.py          只读聚合统计的路由决策
   sentry.py          渐进失效探针（只报警，不改数据）
-  runner.py          三路径对照 + 敏感性分析
+  runner.py          三路径对照 + 敏感性分析（可接预算）
   paths.py           路径解析（不依赖 cwd）
   demo_real_task.py  调研任务沉淀演示
   demo_dual_loop.py  双环三轮演示（探索 → 复核 → 晋升 → 复用）
