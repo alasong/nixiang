@@ -186,13 +186,24 @@ class RunStore:
                 for sid in rec.get("shot_ids", [])}
 
     def load_experience(self) -> ExperienceStore:
-        """加载时过滤掉已淘汰的经验。墓碑是 append-only 的，历史行不动。"""
+        """加载时给出「当前视图」。
+
+        两条规则，都不改历史行：
+          1. 墓碑里的 id 过滤掉（淘汰）
+          2. 同一 id 只保留置信度最高的一条（晋升追加了 decisive 副本，
+             原来的 scored 行还在 —— 不去重会在下次维护时重复晋升）
+        """
         retired = self.load_retired()
-        store = ExperienceStore()
+        best: dict[str, ExperienceItem] = {}
         for d in self._read(self.experience_file):
             item = decode_experience(d)
             if item.shot.id in retired:
                 continue
+            current = best.get(item.shot.id)
+            if current is None or _confidence_rank(item) > _confidence_rank(current):
+                best[item.shot.id] = item
+        store = ExperienceStore()
+        for item in best.values():
             store.add(item)
         return store
 
@@ -206,6 +217,13 @@ class RunStore:
             "usage": len(self._read(self.usage_file)),
             "retired": len(self._read(self.retire_file)),
         }
+
+
+def _confidence_rank(it: ExperienceItem) -> tuple[int, int]:
+    """经验条目的置信排名：decisive+pass > 其它 pass > 其余。"""
+    decisive = 1 if it.verdict.kind == Kind.DECISIVE else 0
+    passed = 1 if it.verdict.status == Status.PASS else 0
+    return (decisive, passed)
 
 
 def replay_verdict(trace: Trace, verifier) -> list[Verdict]:
