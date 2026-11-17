@@ -7,6 +7,7 @@ from __future__ import annotations
 import unittest
 
 from mvp.contracts import Judgment, Kind, Status, Step, Trace, Verdict, fingerprint
+from mvp.demo_dual_loop import cutoff_matches, parse_cutoff
 from mvp.llm import Shot, SimulatedLLM
 from mvp.runner import build_experience, build_index, run_path_cached
 from mvp.store import ExperienceStore, ExperienceItem
@@ -131,6 +132,26 @@ class TestSimulatedLLM(unittest.TestCase):
         a = llm.extract("T1。", [])
         b = llm.extract("T1。", [Shot("s", "t", {"R1"}, "x")] * 3)
         self.assertGreater(b.total_tokens, a.total_tokens)
+
+
+class TestFreshnessParsing(unittest.TestCase):
+    """时效核验的解析：页面里两种截止日写法都要认，认不出必须返回 None 而不是瞎猜。"""
+
+    def test_uppercase_label_form(self) -> None:
+        self.assertEqual(parse_cutoff("<p>DATA CUTOFF: NOV 3, 2026</p>"), "NOV 3, 2026")
+
+    def test_prose_form(self) -> None:
+        self.assertEqual(parse_cutoff("After our data cutoff of Nov 3, 2026, METR published"),
+                         "Nov 3, 2026")
+
+    def test_missing_date_is_none(self) -> None:
+        self.assertIsNone(parse_cutoff("no date here"))
+
+    def test_cutoff_matches_exact_day(self) -> None:
+        self.assertTrue(cutoff_matches("NOV 3, 2026"))
+        self.assertTrue(cutoff_matches("Nov 3, 2026"))
+        self.assertFalse(cutoff_matches("Nov 4, 2026"))
+        self.assertFalse(cutoff_matches("garbage"))
 
 
 if __name__ == "__main__":
