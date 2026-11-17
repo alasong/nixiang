@@ -17,6 +17,7 @@ from mvp.persistence import RunStore
 from mvp.promotion import apply_promotions, evaluate
 from mvp.runner import MAX_ATTEMPTS, run_path
 from mvp.snapshot import SnapshotStore
+from mvp.subgoal import SubGoal, run_parent
 from mvp.store import ExperienceItem, ExperienceStore
 from mvp.tasks import build_tasks, ground_truth
 from mvp.verifier import SetMatchVerifier
@@ -114,11 +115,23 @@ class TestScenario5BudgetExhausted(unittest.TestCase):
 
 
 class TestScenario4SubgoalRecomposition(unittest.TestCase):
-    """场景 4 需要 L1 子目标层，目前没有实现对象。"""
+    """子目标失败 → L1 局部重分解并成功，不惊动 L2。"""
 
-    @unittest.skip("场景 4 未覆盖：L1 子目标分解与局部重分解尚未实现（契约 §1）")
     def test_subgoal_failure_is_contained(self) -> None:
-        raise AssertionError("未实现")
+        calls: list[str] = []
+        out = run_parent(
+            [SubGoal("parse", lambda: False, (lambda: True,)),
+             SubGoal("check", lambda: True)],
+            l2=lambda: calls.append("l2") or True)
+        self.assertFalse(out["l2_called"], "局部重分解成功时不许惊动 L2")
+        self.assertEqual(out["results"][0].branch, 1)
+        self.assertEqual(out["results"][0].attempts, 2)
+
+    def test_handoff_when_recovery_fails(self) -> None:
+        calls: list[str] = []
+        out = run_parent([SubGoal("parse", lambda: False, (lambda: False,))],
+                         l2=lambda: calls.append("l2") or True)
+        self.assertTrue(out["l2_called"], "重分解用尽必须交棒")
 
 
 if __name__ == "__main__":

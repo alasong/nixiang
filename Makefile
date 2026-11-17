@@ -15,7 +15,7 @@ setup:
 	./bootstrap.sh
 
 test:
-	$(PY) -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_budget mvp.test_miner mvp.test_scenarios mvp.test_llm_deepseek -v
+	$(PY) -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_budget mvp.test_miner mvp.test_scenarios mvp.test_subgoal mvp.test_llm_deepseek -v
 
 demo:
 	$(PY) -m mvp
