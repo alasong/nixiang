@@ -71,8 +71,15 @@ def main() -> None:
     sim1, nn_label = sim[:, 0], y_idx[nn[:, 0]]
 
     # 粗粒度族标签（没有 names 时用细类编号）
-    if args.names:
-        names = {i: n for i, n in enumerate(real_c.load_names(Path(args.names)))}
+    names_path = Path(args.names) if args.names else None
+    if names_path is None:
+        try:
+            from mvp.datasets import b77_readme
+            names_path = b77_readme()
+        except Exception as exc:              # 离线也不阻塞，退回细粒度
+            print(f"提示：自动获取类别名失败（{exc}），改用细粒度标签")
+    if names_path is not None:
+        names = {i: n for i, n in enumerate(real_c.load_names(names_path))}
         cmap = real_check.coarse_map(names)
         family_of = lambda label: cmap.get(int(label), "other")   # noqa: E731
         label_note = "粗粒度（9 族）"

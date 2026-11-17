@@ -81,12 +81,11 @@ def main() -> None:
         print("缺少 DEEPSEEK_API_KEY：\n    export DEEPSEEK_API_KEY=sk-...", file=sys.stderr)
         raise SystemExit(2)
 
-    names_path = Path(args.names)
+    from mvp.datasets import b77_readme
+
+    names_path = Path(args.names) if args.names else b77_readme()
     if not names_path.exists():
-        print(f"缺少类别名文件：{names_path}\n"
-              "    curl -fsSL -o data/b77_readme.md "
-              "https://hf-mirror.com/datasets/PolyAI/banking77/raw/main/README.md",
-              file=sys.stderr)
+        print(f"缺少类别名文件：{names_path}", file=sys.stderr)
         raise SystemExit(2)
 
     taus = [float(x) for x in args.tau.split(",")]

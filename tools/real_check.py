@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +26,12 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
-DATA = Path(__file__).resolve().parent.parent / "data"
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from mvp.datasets import b77_names as _b77_names  # noqa: E402
+
+DATA = ROOT / "data"
 
 
 # ---------------------------------------------------------------- 数据加载
@@ -36,12 +42,8 @@ def load_banking77() -> tuple[list[str], np.ndarray]:
 
 
 def b77_names() -> dict[int, str]:
-    """从 README 的 dataset_info 里解析 77 个意图名。"""
-    txt = (DATA / "b77_readme.md").read_text()
-    out = {}
-    for m in re.finditer(r"^\s+'(\d+)':\s*([A-Za-z_0-9]+)\s*$", txt, re.M):
-        out[int(m.group(1))] = m.group(2)
-    return out
+    """77 个意图名。说明文件缺失时会自动下载到缓存（见 mvp/datasets.py）。"""
+    return _b77_names()
 
 
 def coarse_map(names: dict[int, str]) -> dict[int, str]:

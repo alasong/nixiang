@@ -30,7 +30,7 @@ python3 -m mvp
 python3 -m unittest mvp.test_mvp mvp.test_integration mvp.test_promotion mvp.test_evaluator mvp.test_router mvp.test_backward mvp.test_budget mvp.test_budget_runner mvp.test_miner mvp.test_scenarios mvp.test_subgoal mvp.test_retire mvp.test_maintenance mvp.test_llm_deepseek -v
 ```
 
-119 个测试，同样零依赖。
+122 个测试，同样零依赖。
 
 ---
 
@@ -114,11 +114,12 @@ mvp/                 核心实验（纯标准库）
   router.py          只读聚合统计的路由决策
   sentry.py          渐进失效探针（只报警，不改数据）
   runner.py          三路径对照 + 敏感性分析（可接预算）
+  datasets.py        数据集附带文件定位 + 下载缓存（说明文件不再随仓库走）
   paths.py           路径解析（不依赖 cwd）
   demo_real_task.py  调研任务沉淀演示
   demo_dual_loop.py  双环三轮演示（探索 → 复核 → 晋升 → 复用）
   route_and_sentry.py 路由与哨兵演示
-  test_*.py          119 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向 / 契约场景）
+  test_*.py          122 个测试（单元 / 集成 / 晋升 / 评估 / 路由 / 逆向 / 契约场景）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
@@ -129,7 +130,8 @@ tools/
   family_stats.py    按族标签直接统计分布（有标签时不必聚类）
   real_e2e.py        真实数据端到端：轨迹 + 两种 H1 口径对照 + 巡检
 
-data/                700KB 公开数据集，已内置，可离线
+data/                700KB 公开数据集（两个 parquet），已内置
+                     Banking77 说明文件缺省时自动下载到 ~/.cache/harness-lab/
 docs/                设计文档、契约、基线声明、实验报告
 runs/                运行产物（自动生成，已 gitignore）
 ```
