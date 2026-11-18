@@ -19,6 +19,7 @@ from pathlib import Path
 from mvp.core.contracts import Status
 from mvp.core.persistence import RunStore
 from mvp.candidates import load_jsonl
+from mvp.judge import FileJudge, JudgeResult
 from mvp.handle import (FileWriteExecutor, TaskSpec, handle, handle_candidates,
                         handle_twice, parse_task_file, render, split_conjunction)
 
@@ -468,6 +469,86 @@ class TestCandidatesCLI(unittest.TestCase):
                  str(ROOT / "tasks" / "T8-candidates.jsonl")],
                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
             self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+
+
+class TestJudge(unittest.TestCase):
+    def test_judge_overrides_length(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            out = root / "out.txt"
+            contents = ["nixiang 短而准",
+                        "nixiang " + "冗长 " * 80,
+                        "nixiang 中等"]
+            judge = FileJudge([JudgeResult(90, "准"),
+                               JudgeResult(10, "水"),
+                               JudgeResult(50, "中")])
+            result = handle_candidates(
+                TaskSpec(text="写说明", verify=f"grep -q nixiang {out}"),
+                out, contents, judge=judge, store=RunStore(root / "runs"))
+            self.assertTrue(result.passed)
+            self.assertEqual(result.selected, 1)
+            self.assertEqual(result.best_score, 90)
+            self.assertIn("judge=judge-v1", render(result))
+
+
+class TestBudget(unittest.TestCase):
+    def test_subgoal_phase_over_budget_stops(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            md = root / "task.md"
+            md.write_text(
+                "## 子目标\n\n"
+                f"1. 在 {root}/a.txt 写入 aa\n   验收：sleep 0.3 && true\n"
+                f"2. 在 {root}/b.txt 写入 bb\n   验收：sleep 0.3 && true\n",
+                encoding="utf-8")
+            result = handle(TaskSpec(text=str(md), verify="true"),
+                            store=RunStore(root / "runs"), agents=2,
+                            budget_ms=50)
+            self.assertFalse(result.passed)
+            self.assertEqual(result.stop_reason, "budget_exhausted")
+            self.assertIn("budget_exhausted", render(result))
+
+    def test_candidates_stop_midway(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            out = root / "out.txt"
+            spec = TaskSpec(text="写说明",
+                            verify=f"sleep 0.2 && grep -q nixiang {out}")
+            result = handle_candidates(
+                spec, out, ["nixiang a", "nixiang b", "nixiang c"],
+                store=RunStore(root / "runs"), budget_ms=300)
+            self.assertFalse(result.passed)
+            self.assertEqual(result.stop_reason, "budget_exhausted")
+            steps = [s for s in result.trace.steps if s.action == "candidate"]
+            self.assertEqual(len(steps), 2)
+
+
+class TestJudgeBudgetCLI(unittest.TestCase):
+    def test_cli_judge_from(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, HARNESS_LAB_RUNS=d)
+            out = Path(d) / "judge.txt"
+            proc = subprocess.run(
+                [sys.executable, "-m", "mvp.handle",
+                 "--task", "写一段包含 nixiang 的说明", "--out", str(out),
+                 "--verify", f"grep -q nixiang {out}",
+                 "--candidates-from", str(ROOT / "tasks" / "T10-candidates.jsonl"),
+                 "--judge-from", str(ROOT / "tasks" / "T10-judge.jsonl")],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("judge=judge-v1", proc.stdout)
+            self.assertIn("quality best=90", proc.stdout)
+
+    def test_cli_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, HARNESS_LAB_RUNS=d)
+            proc = subprocess.run(
+                [sys.executable, "-m", "mvp.handle", "--task",
+                 str(ROOT / "tasks" / "T7.md"), "--verify", "true",
+                 "--agents", "3", "--budget-ms", "50"],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("budget_exhausted", proc.stdout)
 
 
 if __name__ == "__main__":

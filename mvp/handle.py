@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .candidates import CandidateError, DeepSeekCandidateProvider, load_jsonl
+from .judge import DeepSeekJudge, FileJudge, JudgeError
 from .core.contracts import Judgment, Status, Step, Trace, fingerprint
 from .core.llm_deepseek import DeepSeekError
 from .core.paths import ROOT, RUNS_DIR
@@ -86,6 +87,8 @@ class HandleResult:
     selected: int = 0
     best_score: int = 0
     single_score: int = 0
+    judge_vid: str = ""
+    budget_ms: int = 0
 
     @property
     def passed(self) -> bool:
@@ -360,7 +363,7 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
            store: RunStore | None = None, cwd: str | Path = ROOT,
            timeout: float = TIMEOUT,
            cached: CachedPlan | None = None,
-           agents: int = 1) -> HandleResult:
+           agents: int = 1, budget_ms: int = 0) -> HandleResult:
     """执行一条任务并用外部命令验收；无论成败都落一条轨迹。"""
     executor = executor or FileWriteExecutor()
     store = store or RunStore(RUNS_DIR / "handle")
@@ -378,7 +381,8 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
 
     if subgoals:
         return _handle_subgoals(spec, trace, subgoals, source, executor,
-                                store, cwd, timeout, cached, agents)
+                                store, cwd, timeout, cached, agents,
+                                budget_ms)
 
     parsed = executor.match(content)
     if parsed is None:
@@ -456,7 +460,7 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
                      source: str, executor: Executor, store: RunStore,
                      cwd: str | Path, timeout: float,
                      cached: CachedPlan | None = None,
-                     agents: int = 1) -> HandleResult:
+                     agents: int = 1, budget_ms: int = 0) -> HandleResult:
     """执行子目标；能并行就并行（写域互斥），最后跑全局验收。"""
     task_id = trace.task_id
     trace.attempts = 1
@@ -531,16 +535,22 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
         if oc["ok"]:
             passed += 1
 
+    over_budget = bool(budget_ms) and wall_ms > budget_ms
     global_rc = 0
-    if source == "file":
+    output = ""
+    if source == "file" and not over_budget:
         global_rc, output = _run_verify(spec.verify, cwd, timeout)
         trace.steps.append(_step(f"{task_id}#verify", "verify",
                                  {"rc": global_rc, "output": output},
                                  Judgment.OK if global_rc == 0 else Judgment.RETRY,
                                  0))
-    else:
-        output = ""
-    all_ok = passed == len(subgoals) and global_rc == 0
+    if over_budget:
+        global_rc = -1
+        output = f"budget_exhausted ({wall_ms}ms > {budget_ms}ms)"
+        trace.steps.append(_step(f"{task_id}#budget", "budget",
+                                 {"wall_ms": wall_ms, "budget_ms": budget_ms},
+                                 Judgment.GIVEUP, 0))
+    all_ok = passed == len(subgoals) and global_rc == 0 and not over_budget
     trace.outcome = Status.PASS if all_ok else Status.FAIL
     store.append_trace(trace)
     if not all_ok:
@@ -556,7 +566,9 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
         verify_output=output, execution=execution,
         subgoals=subgoals, subgoals_passed=passed,
         plan_reused=cached is not None,
-        agents_used=workers, stop_reason=stop_reason, wall_ms=wall_ms),
+        agents_used=workers,
+        stop_reason="budget_exhausted" if over_budget else stop_reason,
+        wall_ms=wall_ms, budget_ms=budget_ms),
         trace, spec, subgoals, agents)
 
 
@@ -575,7 +587,8 @@ def handle_twice(spec: TaskSpec, executor: Executor | None = None,
 def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
                       score_command: str = "", store: RunStore | None = None,
                       cwd: str | Path = ROOT, timeout: float = TIMEOUT,
-                      model_calls: int = 0) -> HandleResult:
+                      model_calls: int = 0, judge=None,
+                      budget_ms: int = 0) -> HandleResult:
     """N 份候选逐份写入 out、验收、打分，留下分数最高且通过的那份。"""
     if not contents:
         raise CandidateError("没有候选")
@@ -587,6 +600,8 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
                   verifier_vid=VERIFIER_VID,
                   facts={"verify": spec.verify, "out": str(path),
                          "score": score_command,
+                         "judge_vid": judge.vid if judge is not None else "",
+                         "budget_ms": budget_ms,
                          "candidates": len(contents)})
     trace.attempts = 1
     started = time.monotonic()
@@ -594,12 +609,25 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
     passed = 0
     single = 0
     last_rc, last_output = -1, ""
+    stopped = False
     for index, content in enumerate(contents, 1):
+        if budget_ms and int((time.monotonic() - started) * 1000) > budget_ms:
+            stopped = True
+            break
         data = content if content.endswith("\n") else content + "\n"
         path.write_text(data, encoding="utf-8")
         rc, output = _run_verify(spec.verify, cwd, timeout)
         last_rc, last_output = rc, output
-        score = _run_score(score_command, cwd, timeout) if rc == 0 else 0
+        score = 0
+        if rc == 0:
+            if judge is not None:
+                try:
+                    judged = judge.score(spec.text, data)
+                    score = judged.score
+                except Exception:
+                    score = 0
+            else:
+                score = _run_score(score_command, cwd, timeout)
         if index == 1:
             single = score
         ok = rc == 0
@@ -612,15 +640,22 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
         if ok and (best is None or score > best[0]):
             best = (score, index, data)
 
-    if best is not None:
+    if best is not None and not stopped:
         path.write_text(best[2], encoding="utf-8")
         rc, output = _run_verify(spec.verify, cwd, timeout)
+    elif stopped:
+        rc = -1
+        output = f"budget_exhausted ({budget_ms}ms)"
     else:
         rc, output = last_rc, last_output
-    ok = best is not None and rc == 0
-    trace.steps.append(_step(f"{task_id}#verify", "verify",
-                             {"rc": rc, "output": output},
-                             Judgment.OK if ok else Judgment.RETRY, 0))
+    ok = best is not None and not stopped and rc == 0
+    if stopped:
+        trace.steps.append(_step(f"{task_id}#budget", "budget",
+                                 {"budget_ms": budget_ms}, Judgment.GIVEUP, 0))
+    else:
+        trace.steps.append(_step(f"{task_id}#verify", "verify",
+                                 {"rc": rc, "output": output},
+                                 Judgment.OK if ok else Judgment.RETRY, 0))
     trace.outcome = Status.PASS if ok else Status.FAIL
     store.append_trace(trace)
     if not ok:
@@ -628,7 +663,10 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
     result = HandleResult(
         spec=spec, trace=trace, status="passed" if ok else "failed",
         executor="candidates", verify_rc=rc, verify_output=output,
-        model_calls=model_calls, stop_reason="candidates",
+        model_calls=model_calls,
+        stop_reason="budget_exhausted" if stopped else "candidates",
+        budget_ms=budget_ms,
+        judge_vid=judge.vid if judge is not None else "",
         wall_ms=int((time.monotonic() - started) * 1000),
         candidates_total=len(contents), candidates_passed=passed,
         selected=best[1] if best else 0,
@@ -658,6 +696,10 @@ def render(result: HandleResult, explain: bool = False,
         if show_audit:
             lines.extend(_audit_lines(result))
         return "\n".join(lines)
+    if result.judge_vid:
+        lines.append(f"  judge={result.judge_vid}")
+    if result.stop_reason == "budget_exhausted":
+        lines.append(f"  stop=budget_exhausted  budget_ms={result.budget_ms}")
     if result.candidates_total:
         lines.append(f"  候选  {result.candidates_total} 份  通过 "
                      f"{result.candidates_passed}  选中 {result.selected}")
@@ -696,6 +738,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candidates-from", default="",
                         help="从 JSONL 读候选（离线、可复现）")
     parser.add_argument("--score", default="", help="质量分命令，输出整数")
+    parser.add_argument("--judge", action="store_true",
+                        help="用 DeepSeek 按 rubric 评审候选")
+    parser.add_argument("--judge-from", default="",
+                        help="从 JSONL 读离线评分（可复现）")
+    parser.add_argument("--budget-ms", type=int, default=0,
+                        help="墙钟预算（毫秒），超时即停")
     parser.add_argument("--id", default="", help="任务 id，缺省自动生成")
     parser.add_argument("--runs", default="", help="产物目录，缺省 runs/handle")
     parser.add_argument("--timeout", type=float, default=TIMEOUT)
@@ -714,10 +762,16 @@ def main(argv: list[str] | None = None) -> int:
                 provider = DeepSeekCandidateProvider()
                 contents = provider.generate(args.task, args.candidates)
                 model_calls = provider.calls
+            judge = None
+            if args.judge_from:
+                judge = FileJudge.from_jsonl(args.judge_from)
+            elif args.judge:
+                judge = DeepSeekJudge()
             result = handle_candidates(
                 spec, args.out, contents, score_command=args.score,
-                store=store, timeout=args.timeout, model_calls=model_calls)
-        except (CandidateError, DeepSeekError) as exc:
+                store=store, timeout=args.timeout, model_calls=model_calls,
+                judge=judge, budget_ms=args.budget_ms)
+        except (CandidateError, DeepSeekError, JudgeError) as exc:
             print(f"候选失败：{exc}")
             return 2
         print(render(result, explain=args.explain, show_audit=args.audit))
@@ -731,7 +785,8 @@ def main(argv: list[str] | None = None) -> int:
         result = second
     else:
         result = handle(spec, store=store, timeout=args.timeout,
-                        agents=max(1, args.agents))
+                        agents=max(1, args.agents),
+                        budget_ms=args.budget_ms)
         print(render(result, explain=args.explain, show_audit=args.audit))
     if result.status == "unsupported":
         return 2
