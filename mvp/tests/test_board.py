@@ -1,7 +1,6 @@
 """文本看板的读写与状态机：解析 TASKS.md、推进卡片、跑验收。"""
 from __future__ import annotations
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,12 +10,26 @@ from mvp import board
 ROOT = Path(__file__).resolve().parents[2]
 REAL = ROOT / "TASKS.md"
 
+FAKE = """# T
 
-def temp_board(tc: unittest.TestCase) -> board.Board:
+| id | 任务 | 能力 | 覆盖 | 验收命令 | 期望 | 状态 | 尝试 | 证据 |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 甲 | act | g1 | `python3 -c 'print(1)'` | rc=0 | todo | 0 | — |
+| T2 | 乙 | act | g1 | `python3 -c 'raise SystemExit(3)'` | rc=0 | todo | 0 | — |
+
+## 目标条目
+
+| gid | 条目 |
+|---|---|
+| g1 | 目标一 |
+"""
+
+
+def fake_board(tc: unittest.TestCase) -> board.Board:
     tmp = tempfile.TemporaryDirectory()
     tc.addCleanup(tmp.cleanup)
     path = Path(tmp.name) / "TASKS.md"
-    shutil.copy(REAL, path)
+    path.write_text(FAKE, encoding="utf-8")
     return board.load(path)
 
 
@@ -24,7 +37,7 @@ class TestParse(unittest.TestCase):
     def test_parses_real_board(self) -> None:
         b = board.load(REAL)
         self.assertEqual([c.id for c in b.cards],
-                         ["T1", "T2", "T3", "T4", "T5"])
+                         ["T1", "T2", "T3", "T4", "T5", "T6"])
         self.assertEqual(b.cards[0].status, "done")
         self.assertIn("R1", b.cards[0].expect)
         self.assertIn("mvp.handle", b.cards[1].command)
@@ -43,53 +56,46 @@ class TestParse(unittest.TestCase):
 
 class TestTransitions(unittest.TestCase):
     def test_start_requires_single_doing(self) -> None:
-        b = temp_board(self)
-        board.start(b, "T2")
+        b = fake_board(self)
+        board.start(b, "T2")          # T2 的验收失败，红检放行
         self.assertEqual(board.get(b, "T2").status, "doing")
         with self.assertRaises(board.BoardError):
-            board.start(b, "T3")
+            board.start(b, "T1")
 
     def test_add_respects_open_limit(self) -> None:
-        b = temp_board(self)
-        # 现有 4 个未完成（T2-T5），加 1 个到 5，再加就该拒绝
-        board.add(b, title="第六件事", capability="act",
-                  command="python3 -c 'print(1)'", expect="rc=0")
+        b = fake_board(self)
+        for i in range(3):
+            board.add(b, title=f"加{i}", capability="act",
+                      command="python3 -c 'print(1)'", expect="rc=0")
         with self.assertRaises(board.BoardError):
-            board.add(b, title="第七件事", capability="act",
+            board.add(b, title="越界", capability="act",
                       command="python3 -c 'print(1)'", expect="rc=0")
 
     def test_verify_success_marks_done(self) -> None:
-        b = temp_board(self)
-        card = board.add(b, title="输出 R1 的假任务", capability="judge",
-                         command="python3 -c \"print('R1')\"",
-                         expect="rc=0，输出含 `R1`")
-        board.verify(b, card.id)
-        saved = board.get(b, card.id)
+        b = fake_board(self)
+        board.verify(b, "T1")
+        saved = board.get(b, "T1")
         self.assertEqual(saved.status, "done")
         self.assertIn("rc=0", saved.evidence)
 
     def test_verify_failure_keeps_doing_with_evidence(self) -> None:
-        b = temp_board(self)
-        card = board.add(b, title="必然失败", capability="act",
-                         command="python3 -c 'raise SystemExit(3)'",
-                         expect="rc=0")
-        board.verify(b, card.id)
-        saved = board.get(b, card.id)
+        b = fake_board(self)
+        board.verify(b, "T2")
+        saved = board.get(b, "T2")
         self.assertNotEqual(saved.status, "done")
         self.assertIn("rc=3", saved.evidence)
 
     def test_done_requires_evidence(self) -> None:
-        b = temp_board(self)
+        b = fake_board(self)
         with self.assertRaises(board.BoardError):
-            board.finish(b, "T2", rc=0, note="")
+            board.finish(b, "T1", rc=0, note="")
 
     def test_persisted_after_save_and_reload(self) -> None:
-        b = temp_board(self)
-        card = board.add(b, title="落盘检查", capability="act",
-                         command="python3 -c 'print(1)'", expect="rc=0")
+        b = fake_board(self)
+        board.get(b, "T1").title = "改过的标题"
         board.save(b)
         again = board.load(b.path)
-        self.assertEqual(board.get(again, card.id).title, "落盘检查")
+        self.assertEqual(board.get(again, "T1").title, "改过的标题")
 
 
 if __name__ == "__main__":
