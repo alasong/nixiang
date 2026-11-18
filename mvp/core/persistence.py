@@ -110,9 +110,11 @@ class RunStore:
         self.usage_file = self.root / "usage.jsonl"
         self.retire_file = self.root / "retired.jsonl"
         self.labels_file = self.root / "labels.jsonl"
+        self.probes_file = self.root / "probes.jsonl"
         # 空文件也创建：下游消费者不必处理「文件不存在」这条路径
         for p in (self.traces_file, self.negative_file, self.experience_file,
-                  self.usage_file, self.retire_file, self.labels_file):
+                  self.usage_file, self.retire_file, self.labels_file,
+                  self.probes_file):
             p.touch()
 
     # -- 写
@@ -164,6 +166,13 @@ class RunStore:
         with self.labels_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
+    def append_probe(self, result) -> None:
+        """哨兵探针结果：两条路径的答案是否一致。只追加，供差异率报警。"""
+        rec = result.to_dict()
+        rec["logged_at"] = _now()
+        with self.probes_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
     def append_usage(self, shot_ids: list[str], task_id: str, outcome: str,
                      note: str = "") -> None:
         """记一次复用：哪几条经验被用上、结果如何。
@@ -201,6 +210,9 @@ class RunStore:
 
     def load_usage(self) -> list[dict]:
         return self._read(self.usage_file)
+
+    def load_probes(self) -> list[dict]:
+        return self._read(self.probes_file)
 
     def load_labels(self) -> dict[str, set[str]]:
         """当前标签视图：同一任务取最后一条（append-only，不删历史行）。"""
@@ -245,6 +257,7 @@ class RunStore:
             "usage": len(self._read(self.usage_file)),
             "retired": len(self._read(self.retire_file)),
             "labels": len(self._read(self.labels_file)),
+            "probes": len(self._read(self.probes_file)),
         }
 
 

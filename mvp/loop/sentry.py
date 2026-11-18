@@ -15,6 +15,7 @@ from ..core.snapshot import SnapshotStore
 
 NEGATIVE_WARN = 0.2          # 负证据占轨迹比例
 USAGE_FAIL_CRITICAL = 0.1    # 复用失败率
+PROBE_CRITICAL = 0.05        # 探针差异率：超 5% 说明收敛在做错事（阈值未标定）
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,16 @@ def inspect(sink, snapshots: SnapshotStore) -> list[Alarm]:
     if idle:
         alarms.append(Alarm("warn", "dormant_experience",
                             f"{len(idle)} 条高置信经验从未被使用：{', '.join(sorted(idle))}"))
+
+    probes = sink.load_probes()
+    if probes:
+        bad = [p for p in probes if not p.get("agree")]
+        if bad:
+            rate = len(bad) / len(probes)
+            alarms.append(Alarm(
+                "critical" if rate > PROBE_CRITICAL else "warn", "probe_disagree",
+                f"探针 {len(bad)}/{len(probes)} 条两路答案不一致（{rate:.0%}）"
+                f"——收敛可能在高效率地做错事"))
 
     if counts["experience"] and not usage:
         alarms.append(Alarm("warn", "pipeline_gap",
