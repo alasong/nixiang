@@ -197,10 +197,10 @@ python3 -m mvp.handle --task "在 /tmp/x.txt 写入两行介绍 nixiang" \
 
 ```bash
 zsh -ic 'python3 tools/real_measure.py'
-# 8 任务 × 3 候选：single 8/8、best 8/8、single_fail=0、mean_wall 3043ms
+# 基础 8 任务：single 8/8；难任务 4：single 3/4，hard-exact 全败且未被救回
 ```
 
-读数与限制见 `docs/真实模型测量_2026-11.md`（含严格验收第二轮：救回率 0，保险价值未被触发）。
+读数与限制见 `docs/真实模型测量_2026-11.md`（三轮：基础全过、严格验收全过、难任务 3/4 且系统性失败未被救回）。
 
 rubric 校准（有标注样本时用）：
 
