@@ -43,6 +43,7 @@
 | T25 | 在线路由（按验收形状） | route | g25 | `python3 -m mvp.route --demo` | rc=0，输出含 `route=` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T26 | 阈值标定（需真实流量） | tune | g26 | `test -s data/traffic.jsonl` | rc=0 | blocked | 0 | 2026-11-18 等真实流量样本 data/traffic.jsonl；没有它阈值只能拍 |
 | T27 | 微调（排最后） | tune | g27 | `test -s data/finetune.jsonl && test -s data/real_tasks.jsonl` | rc=0 | blocked | 0 | 2026-11-18 等真实数据+前四段指标稳定；设计文档规定微调排最后 |
+| T28 | 形式化器尊重 --out 并校验计划路径 | formalize | g28 | `python3 -m unittest mvp.tests.test_formalize_out -q` | rc=0 | todo | 0 | — |
 
 ## 目标条目
 
@@ -76,6 +77,7 @@
 | g25 | 在线路由（按验收形状选 auto-plan/formalize/单份） |
 | g26 | 阈值标定（抽样/TV/对抗/标签覆盖，需真实流量） |
 | g27 | 微调（前四段指标稳定 + 数据量，排最后） |
+| g28 | 形式化器尊重 --out 并校验计划路径 |
 
 ## 验收协议
 
