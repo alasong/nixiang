@@ -1,6 +1,7 @@
 """文本看板的读写与状态机：解析 TASKS.md、推进卡片、跑验收。"""
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,7 +50,10 @@ class TestParse(unittest.TestCase):
                          [(c.id, c.status) for c in b.cards])
 
     def test_rejects_unknown_status(self) -> None:
-        text = board.render(board.load(REAL)).replace("| todo |", "| 进行中 |", 1)
+        # 不假设板上一定有 todo 卡：取第一张卡的状态改成非法值
+        text = re.sub(r"\| (?:todo|doing|done|blocked) \|", "| 进行中 |",
+                      board.render(board.load(REAL)), count=1)
+        self.assertIn("| 进行中 |", text)
         with self.assertRaises(board.BoardError):
             board.parse(text, REAL)
 

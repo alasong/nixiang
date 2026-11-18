@@ -18,7 +18,7 @@ from pathlib import Path
 
 from mvp.core.contracts import Status
 from mvp.core.persistence import RunStore
-from mvp.handle import (FileWriteExecutor, TaskSpec, handle,
+from mvp.handle import (FileWriteExecutor, TaskSpec, handle, handle_twice,
                         parse_task_file, render, split_conjunction)
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -248,6 +248,66 @@ class TestCompositeCLI(unittest.TestCase):
                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             self.assertIn("子目标 3/3", proc.stdout)
+
+
+class TestPathResolution(unittest.TestCase):
+    def test_extensionless_path_resolves_to_existing_md(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            target = root / "notes.md"
+            target.write_text("x\n", encoding="utf-8")
+            spec = TaskSpec(text=f"在 {root}/notes 末尾加一行 y",
+                            verify=f"grep -q '^y$' {target}")
+            result = handle(spec, store=RunStore(root / "runs"))
+            self.assertTrue(result.passed)
+            self.assertEqual(target.read_text(encoding="utf-8"), "x\ny\n")
+            self.assertFalse((root / "notes").exists())
+
+    def test_md_sibling_wins_when_both_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            bare = root / "README"
+            bare.write_text("bare\n", encoding="utf-8")
+            md = root / "README.md"
+            md.write_text("md\n", encoding="utf-8")
+            spec = TaskSpec(text=f"在 {root}/README 末尾加一行 y",
+                            verify=f"grep -q '^y$' {md}")
+            result = handle(spec, store=RunStore(root / "runs"))
+            self.assertTrue(result.passed)
+            self.assertEqual(md.read_text(encoding="utf-8"), "md\ny\n")
+            self.assertEqual(bare.read_text(encoding="utf-8"), "bare\n")
+
+
+class TestTwice(unittest.TestCase):
+    def test_second_run_reuses_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            target = root / "hello.txt"
+            store = RunStore(root / "runs")
+            spec = TaskSpec(text=f"在 {target} 写入 hello",
+                            verify=f"grep -q hello {target}")
+            first, second = handle_twice(spec, store=store)
+            self.assertTrue(first.passed)
+            self.assertTrue(second.passed)
+            self.assertTrue(second.plan_reused)
+            self.assertEqual(second.model_calls, 0)
+            plans = store.root / "plans.jsonl"
+            self.assertTrue(plans.exists())
+            self.assertGreaterEqual(
+                len(plans.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_cli_twice_reports_model_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, HARNESS_LAB_RUNS=d)
+            target = Path(d) / "cli.txt"
+            proc = subprocess.run(
+                [sys.executable, "-m", "mvp.handle", "--task",
+                 f"在 {target} 写入 cli-ok", "--verify",
+                 f"grep -q cli-ok {target}", "--twice"],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("model_calls=0", proc.stdout)
+            self.assertIn("计划缓存", proc.stdout)
 
 
 if __name__ == "__main__":

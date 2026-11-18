@@ -103,6 +103,19 @@ python3 -m mvp.handle --task tasks/T2.md --verify "make docs-check" --explain
 没有 `验收：` 的子目标会被分解器丢弃，不许执行；任务文件来源的子目标全过后，
 全局验收仍要单独通过。
 
+同类任务第二次（T4）：`--twice` 连跑两次，第二次命中计划缓存：
+
+```bash
+python3 -m mvp.handle --task "在 /tmp/xm-hello.txt 写入 hello" \
+  --verify "grep -q hello /tmp/xm-hello.txt" --twice
+# --- 第二次（复用计划）---
+#   复用  计划缓存
+# model_calls=0
+```
+
+`model_calls=0` 在 M0/M1 是结构性的（这两层本来不调模型）；接真实模型后，
+这个计数才有区分力。
+
 单条任务：
 
 ```bash
@@ -164,7 +177,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 254 条测试，约 1 秒
+make test        # 258 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 ```
@@ -343,7 +356,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             254 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             258 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）

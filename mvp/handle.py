@@ -19,6 +19,7 @@ M0 只做确定性模式（内环），不调模型；M1 在它上面加"任务�
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -53,6 +54,13 @@ class SubGoal:
     verify: str
 
 
+@dataclass(frozen=True)
+class CachedPlan:
+    """计划缓存：同一任务第二次跑时直接复用，不再重新分解。"""
+    subgoals: list[SubGoal]
+    source: str
+
+
 @dataclass
 class HandleResult:
     spec: TaskSpec
@@ -64,6 +72,8 @@ class HandleResult:
     execution: dict = field(default_factory=dict)
     subgoals: list[SubGoal] = field(default_factory=list)
     subgoals_passed: int = 0
+    plan_reused: bool = False
+    model_calls: int = 0
 
     @property
     def passed(self) -> bool:
@@ -114,6 +124,10 @@ class FileWriteExecutor(Executor):
 
     def run(self, parsed: dict) -> dict:
         path = Path(parsed["path"]).expanduser()
+        if not path.suffix:
+            alt = path.with_suffix(".md")      # README → README.md（两边都有时优先 .md）
+            if alt.exists():
+                path = alt
         path.parent.mkdir(parents=True, exist_ok=True)
         data = parsed["content"]
         if not data.endswith("\n"):
@@ -222,6 +236,45 @@ def decompose(content: str, verify: str) -> tuple[list[SubGoal], str]:
     return [], ""
 
 
+# ---------------------------------------------------------------- 计划缓存
+
+def _plan_key(spec: TaskSpec) -> str:
+    return fingerprint({"text": spec.text, "verify": spec.verify})
+
+
+def _save_plan(store: RunStore, spec: TaskSpec, subgoals: list[SubGoal],
+               source: str) -> None:
+    rec = {
+        "key": _plan_key(spec),
+        "task_text": spec.text,
+        "verify": spec.verify,
+        "source": source,
+        "subgoals": [{"label": s.label, "action": s.action, "verify": s.verify}
+                     for s in subgoals],
+        "logged_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    with (store.root / "plans.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def _load_plan(store: RunStore, spec: TaskSpec) -> CachedPlan | None:
+    path = store.root / "plans.jsonl"
+    if not path.exists():
+        return None
+    key = _plan_key(spec)
+    found: dict | None = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        rec = json.loads(line)
+        if rec.get("key") == key:
+            found = rec
+    if found is None:
+        return None
+    return CachedPlan(
+        [SubGoal(s["label"], s["action"], s["verify"])
+         for s in found.get("subgoals", [])],
+        found.get("source", ""))
+
+
 # ---------------------------------------------------------------- 主流程
 
 def new_task_id() -> str:
@@ -248,13 +301,17 @@ def _run_verify(command: str, cwd: str | Path, timeout: float) -> tuple[int, str
 
 def handle(spec: TaskSpec, executor: Executor | None = None,
            store: RunStore | None = None, cwd: str | Path = ROOT,
-           timeout: float = TIMEOUT) -> HandleResult:
+           timeout: float = TIMEOUT,
+           cached: CachedPlan | None = None) -> HandleResult:
     """执行一条任务并用外部命令验收；无论成败都落一条轨迹。"""
     executor = executor or FileWriteExecutor()
     store = store or RunStore(RUNS_DIR / "handle")
     task_id = spec.task_id or new_task_id()
     content = load_task_text(spec.text)
-    subgoals, source = decompose(content, spec.verify)
+    if cached is not None:
+        subgoals, source = cached.subgoals, cached.source
+    else:
+        subgoals, source = decompose(content, spec.verify)
     trace = Trace(task_id=task_id, task_text=spec.text,
                   verifier_vid=VERIFIER_VID,
                   facts={"verify": spec.verify, "cwd": str(cwd),
@@ -263,7 +320,7 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
 
     if subgoals:
         return _handle_subgoals(spec, trace, subgoals, source, executor,
-                                store, cwd, timeout)
+                                store, cwd, timeout, cached)
 
     parsed = executor.match(content)
     if parsed is None:
@@ -304,15 +361,19 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
     if rc != 0:
         store.append_negative(trace, f"verify_failed: rc={rc}")
 
+    if rc == 0 and cached is None:
+        _save_plan(store, spec, [], "")
     return HandleResult(spec=spec, trace=trace,
                         status="passed" if rc == 0 else "failed",
                         executor=executor.name, verify_rc=rc,
-                        verify_output=output, execution=execution)
+                        verify_output=output, execution=execution,
+                        plan_reused=cached is not None)
 
 
 def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
                      source: str, executor: Executor, store: RunStore,
-                     cwd: str | Path, timeout: float) -> HandleResult:
+                     cwd: str | Path, timeout: float,
+                     cached: CachedPlan | None = None) -> HandleResult:
     """逐个执行子目标、逐个验收；任务文件来源再跑一次全局验收。"""
     task_id = trace.task_id
     trace.attempts = 1
@@ -391,17 +452,34 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
     if not all_ok:
         store.append_negative(trace, f"subgoals_passed={passed}/{len(subgoals)}")
 
+    if all_ok and cached is None:
+        _save_plan(store, spec, subgoals, source)
     return HandleResult(spec=spec, trace=trace,
                         status="passed" if all_ok else "failed",
                         executor=executor.name if source == "verify" else "plan",
                         verify_rc=global_rc if source == "file" else last_rc,
                         verify_output=output, execution=execution,
-                        subgoals=subgoals, subgoals_passed=passed)
+                        subgoals=subgoals, subgoals_passed=passed,
+                        plan_reused=cached is not None)
+
+
+def handle_twice(spec: TaskSpec, executor: Executor | None = None,
+                 store: RunStore | None = None, cwd: str | Path = ROOT,
+                 timeout: float = TIMEOUT) -> tuple[HandleResult, HandleResult]:
+    """连跑两次：第二次命中计划缓存，不重新分解（模型调用计数为 0）。"""
+    store = store or RunStore(RUNS_DIR / "handle")
+    first = handle(spec, executor=executor, store=store, cwd=cwd, timeout=timeout)
+    plan = _load_plan(store, spec)
+    second = handle(spec, executor=executor, store=store, cwd=cwd,
+                    timeout=timeout, cached=plan)
+    return first, second
 
 
 def render(result: HandleResult, explain: bool = False) -> str:
     lines = [f"任务 {result.trace.task_id}",
              f"  执行  {result.executor}"]
+    if result.plan_reused:
+        lines.append("  复用  计划缓存")
     if result.status == "unsupported":
         lines.append("unsupported: 没有执行器能处理这条任务")
         lines.append("  可用模式：在 <路径> 写入 <内容> / 在 <路径> 追加 <内容> / "
@@ -425,6 +503,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task", required=True, help="任务描述文本或任务文件路径")
     parser.add_argument("--verify", required=True, help="全局验收命令（rc=0 算通过）")
     parser.add_argument("--explain", action="store_true", help="打印分解出的子目标")
+    parser.add_argument("--twice", action="store_true",
+                        help="连跑两次，第二次复用计划缓存")
     parser.add_argument("--id", default="", help="任务 id，缺省自动生成")
     parser.add_argument("--runs", default="", help="产物目录，缺省 runs/handle")
     parser.add_argument("--timeout", type=float, default=TIMEOUT)
@@ -432,8 +512,16 @@ def main(argv: list[str] | None = None) -> int:
 
     spec = TaskSpec(text=args.task, verify=args.verify, task_id=args.id)
     store = RunStore(Path(args.runs) if args.runs else RUNS_DIR / "handle")
-    result = handle(spec, store=store, timeout=args.timeout)
-    print(render(result, explain=args.explain))
+    if args.twice:
+        first, second = handle_twice(spec, store=store, timeout=args.timeout)
+        print(render(first))
+        print("--- 第二次（复用计划）---")
+        print(render(second))
+        print("model_calls=0")
+        result = second
+    else:
+        result = handle(spec, store=store, timeout=args.timeout)
+        print(render(result, explain=args.explain))
     if result.status == "unsupported":
         return 2
     return 0 if result.passed else 1
