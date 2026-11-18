@@ -30,7 +30,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from .candidates import CandidateError, DeepSeekCandidateProvider, load_jsonl
 from .core.contracts import Judgment, Status, Step, Trace, fingerprint
+from .core.llm_deepseek import DeepSeekError
 from .core.paths import ROOT, RUNS_DIR
 from .core.persistence import RunStore
 
@@ -79,6 +81,11 @@ class HandleResult:
     stop_reason: str = ""
     wall_ms: int = 0
     audit: list[tuple[str, bool]] = field(default_factory=list)
+    candidates_total: int = 0
+    candidates_passed: int = 0
+    selected: int = 0
+    best_score: int = 0
+    single_score: int = 0
 
     @property
     def passed(self) -> bool:
@@ -324,6 +331,20 @@ def _step(node_id: str, action: str, output: dict, judgment: Judgment,
                 judgment=judgment, cost=cost, latency_ms=latency_ms)
 
 
+_INT_RE = re.compile(r"-?\d+")
+
+
+def _run_score(command: str, cwd: str | Path, timeout: float) -> int:
+    """跑质量分命令，取输出里第一个整数；命令失败或缺省记 0。"""
+    if not command:
+        return 0
+    rc, output = _run_verify(command, cwd, timeout)
+    if rc != 0:
+        return 0
+    match = _INT_RE.search(output)
+    return int(match.group(0)) if match else 0
+
+
 def _run_verify(command: str, cwd: str | Path, timeout: float) -> tuple[int, str]:
     try:
         proc = subprocess.run(command, shell=True, cwd=str(cwd),
@@ -551,6 +572,70 @@ def handle_twice(spec: TaskSpec, executor: Executor | None = None,
     return first, second
 
 
+def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
+                      score_command: str = "", store: RunStore | None = None,
+                      cwd: str | Path = ROOT, timeout: float = TIMEOUT,
+                      model_calls: int = 0) -> HandleResult:
+    """N 份候选逐份写入 out、验收、打分，留下分数最高且通过的那份。"""
+    if not contents:
+        raise CandidateError("没有候选")
+    store = store or RunStore(RUNS_DIR / "handle")
+    path = Path(out)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    task_id = spec.task_id or new_task_id()
+    trace = Trace(task_id=task_id, task_text=spec.text,
+                  verifier_vid=VERIFIER_VID,
+                  facts={"verify": spec.verify, "out": str(path),
+                         "score": score_command,
+                         "candidates": len(contents)})
+    trace.attempts = 1
+    started = time.monotonic()
+    best: tuple[int, int, str] | None = None
+    passed = 0
+    single = 0
+    last_rc, last_output = -1, ""
+    for index, content in enumerate(contents, 1):
+        data = content if content.endswith("\n") else content + "\n"
+        path.write_text(data, encoding="utf-8")
+        rc, output = _run_verify(spec.verify, cwd, timeout)
+        last_rc, last_output = rc, output
+        score = _run_score(score_command, cwd, timeout) if rc == 0 else 0
+        if index == 1:
+            single = score
+        ok = rc == 0
+        if ok:
+            passed += 1
+        trace.steps.append(_step(
+            f"{task_id}#cand{index}", "candidate",
+            {"index": index, "rc": rc, "score": score, "output": output},
+            Judgment.OK if ok else Judgment.RETRY, 0))
+        if ok and (best is None or score > best[0]):
+            best = (score, index, data)
+
+    if best is not None:
+        path.write_text(best[2], encoding="utf-8")
+        rc, output = _run_verify(spec.verify, cwd, timeout)
+    else:
+        rc, output = last_rc, last_output
+    ok = best is not None and rc == 0
+    trace.steps.append(_step(f"{task_id}#verify", "verify",
+                             {"rc": rc, "output": output},
+                             Judgment.OK if ok else Judgment.RETRY, 0))
+    trace.outcome = Status.PASS if ok else Status.FAIL
+    store.append_trace(trace)
+    if not ok:
+        store.append_negative(trace, f"no_candidate_passed ({len(contents)})")
+    result = HandleResult(
+        spec=spec, trace=trace, status="passed" if ok else "failed",
+        executor="candidates", verify_rc=rc, verify_output=output,
+        model_calls=model_calls, stop_reason="candidates",
+        wall_ms=int((time.monotonic() - started) * 1000),
+        candidates_total=len(contents), candidates_passed=passed,
+        selected=best[1] if best else 0,
+        best_score=best[0] if best else 0, single_score=single)
+    return _finish(result, trace, spec, [], 1)
+
+
 def _audit_lines(result: HandleResult) -> list[str]:
     ok = sum(1 for _, passed in result.audit if passed)
     detail = " ".join(f"{name}={'✓' if passed else '✗'}"
@@ -573,6 +658,12 @@ def render(result: HandleResult, explain: bool = False,
         if show_audit:
             lines.extend(_audit_lines(result))
         return "\n".join(lines)
+    if result.candidates_total:
+        lines.append(f"  候选  {result.candidates_total} 份  通过 "
+                     f"{result.candidates_passed}  选中 {result.selected}")
+        lines.append(f"quality best={result.best_score} "
+                     f"single={result.single_score} "
+                     f"candidates={result.candidates_total}")
     if result.subgoals:
         lines.append(f"  子目标 {result.subgoals_passed}/{len(result.subgoals)}")
         if explain:
@@ -599,6 +690,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="并行执行子目标的 worker 数（默认 1）")
     parser.add_argument("--audit", action="store_true",
                         help="打印过程审计 6 项")
+    parser.add_argument("--out", default="", help="候选/内容写入路径")
+    parser.add_argument("--candidates", type=int, default=0,
+                        help="用 DeepSeek 生成 N 份候选")
+    parser.add_argument("--candidates-from", default="",
+                        help="从 JSONL 读候选（离线、可复现）")
+    parser.add_argument("--score", default="", help="质量分命令，输出整数")
     parser.add_argument("--id", default="", help="任务 id，缺省自动生成")
     parser.add_argument("--runs", default="", help="产物目录，缺省 runs/handle")
     parser.add_argument("--timeout", type=float, default=TIMEOUT)
@@ -606,6 +703,25 @@ def main(argv: list[str] | None = None) -> int:
 
     spec = TaskSpec(text=args.task, verify=args.verify, task_id=args.id)
     store = RunStore(Path(args.runs) if args.runs else RUNS_DIR / "handle")
+    if args.candidates_from or args.candidates:
+        if not args.out:
+            parser.error("--candidates / --candidates-from 需要 --out")
+        try:
+            if args.candidates_from:
+                contents = load_jsonl(args.candidates_from)
+                model_calls = 0
+            else:
+                provider = DeepSeekCandidateProvider()
+                contents = provider.generate(args.task, args.candidates)
+                model_calls = provider.calls
+            result = handle_candidates(
+                spec, args.out, contents, score_command=args.score,
+                store=store, timeout=args.timeout, model_calls=model_calls)
+        except (CandidateError, DeepSeekError) as exc:
+            print(f"候选失败：{exc}")
+            return 2
+        print(render(result, explain=args.explain, show_audit=args.audit))
+        return 0 if result.passed else 1
     if args.twice:
         first, second = handle_twice(spec, store=store, timeout=args.timeout)
         print(render(first))

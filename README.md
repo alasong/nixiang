@@ -126,6 +126,25 @@ python3 -m mvp.handle --task tasks/T7.md --verify "make docs-check" --agents 3 -
 
 写域冲突（多个子目标写同一路径）会自动退回串行，并打印 `stop=write_conflict`。
 
+N 路候选 + 质量分（M2b）：在通过验收的候选里取最高分。
+
+```bash
+# 离线候选集（可复现，T8 卡用它验收）
+python3 -m mvp.handle --task "写一段包含 nixiang 的说明" --out /tmp/x.txt \
+  --verify "grep -q nixiang /tmp/x.txt" --score "wc -l < /tmp/x.txt" \
+  --candidates-from tasks/T8-candidates.jsonl
+#   候选  3 份  通过 2  选中 3
+# quality best=3 single=0 candidates=3
+
+# 真实模型采样（需要 DEEPSEEK_API_KEY）
+python3 -m mvp.handle --task "用两三段介绍 nixiang 项目" --out /tmp/y.txt \
+  --verify "grep -q nixiang /tmp/y.txt" --score "wc -m < /tmp/y.txt" --candidates 3
+# quality best=311 single=223 candidates=3   （实测读数，见报告）
+```
+
+`--score` 是外部质量分命令（输出整数）；选择器只会在通过验收的候选里取分最高
+的那份。质量分本身是不是"好"，决定这次选择的实际意义——长度不等于质量。
+
 单条任务：
 
 ```bash
@@ -187,7 +206,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 263 条测试，约 1 秒
+make test        # 269 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 ```
@@ -341,6 +360,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     snapshot.py      快照实体（验证器版本 + 经验 id + 时效）
     datasets.py      数据集文件定位 + 下载缓存
     paths.py         路径解析（不依赖 cwd）
+  candidates.py      候选生成：离线 JSONL 或 DeepSeek 采样（N 路候选）
   loop/              双环运行层
     runner.py        三路径对照（可接预算）
     backward.py      逆向推理：三态求值 + 短路 + 已证伪停下
@@ -366,7 +386,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             263 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             269 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）

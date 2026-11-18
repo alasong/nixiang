@@ -18,8 +18,9 @@ from pathlib import Path
 
 from mvp.core.contracts import Status
 from mvp.core.persistence import RunStore
-from mvp.handle import (FileWriteExecutor, TaskSpec, handle, handle_twice,
-                        parse_task_file, render, split_conjunction)
+from mvp.candidates import load_jsonl
+from mvp.handle import (FileWriteExecutor, TaskSpec, handle, handle_candidates,
+                        handle_twice, parse_task_file, render, split_conjunction)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -387,5 +388,88 @@ class TestAgentsCLI(unittest.TestCase):
             self.assertIn("agents=3", proc.stdout)
 
 
+class TestCandidates(unittest.TestCase):
+    def test_selects_highest_score_among_passing(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            out = root / "out.txt"
+            store = RunStore(root / "runs")
+            contents = ["不相关的内容",
+                        "nixiang 说明\n第二行",
+                        "nixiang 说明\n第二行\n第三行"]
+            spec = TaskSpec(text="写说明", verify=f"grep -q nixiang {out}")
+            result = handle_candidates(spec, out, contents,
+                                       score_command=f"wc -l < {out}",
+                                       store=store)
+            self.assertTrue(result.passed)
+            self.assertEqual(result.candidates_total, 3)
+            self.assertEqual(result.selected, 3)
+            self.assertEqual(result.best_score, 3)
+            self.assertIn("candidates=3", render(result))
+            self.assertIn("第三行", out.read_text(encoding="utf-8"))
+
+    def test_no_candidate_passes_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            out = root / "out.txt"
+            spec = TaskSpec(text="写说明", verify=f"grep -q nixiang {out}")
+            result = handle_candidates(spec, out, ["a", "b"],
+                                       score_command=f"wc -l < {out}",
+                                       store=RunStore(root / "runs"))
+            self.assertFalse(result.passed)
+            self.assertEqual(result.selected, 0)
+            self.assertIn("verify: fail", render(result))
+
+    def test_trace_has_one_step_per_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            out = root / "out.txt"
+            store = RunStore(root / "runs")
+            spec = TaskSpec(text="写说明", verify=f"grep -q nixiang {out}")
+            handle_candidates(spec, out, ["x", "nixiang ok"], store=store)
+            import json as _json
+            rec = _json.loads(store.traces_file.read_text(encoding="utf-8").splitlines()[0])
+            actions = [step["action"] for step in rec["steps"]]
+            self.assertEqual(actions.count("candidate"), 2)
+            self.assertIn("verify", actions)
+
+
+class TestLoadCandidates(unittest.TestCase):
+    def test_reads_string_and_object_lines(self) -> None:
+        import json as _json
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "c.jsonl"
+            path.write_text(_json.dumps("a") + "\n" + _json.dumps({"content": "b"}) + "\n",
+                            encoding="utf-8")
+            self.assertEqual(load_jsonl(path), ["a", "b"])
+
+
+class TestCandidatesCLI(unittest.TestCase):
+    def test_cli_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, HARNESS_LAB_RUNS=d)
+            out = Path(d) / "m2b.txt"
+            proc = subprocess.run(
+                [sys.executable, "-m", "mvp.handle",
+                 "--task", "写一段包含 nixiang 的说明", "--out", str(out),
+                 "--verify", f"grep -q nixiang {out}",
+                 "--score", f"wc -l < {out}",
+                 "--candidates-from", str(ROOT / "tasks" / "T8-candidates.jsonl")],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("candidates=3", proc.stdout)
+
+    def test_cli_requires_out(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, HARNESS_LAB_RUNS=d)
+            proc = subprocess.run(
+                [sys.executable, "-m", "mvp.handle", "--task", "x",
+                 "--verify", "true", "--candidates-from",
+                 str(ROOT / "tasks" / "T8-candidates.jsonl")],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
+
