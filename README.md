@@ -214,6 +214,19 @@ python3 -m mvp.handle --task "文件里要既有 a 又有 b" \
 ```
 
 `--width 1` 只试朴素方案（会失败）；`--depth 0` 关闭回退重分解。
+`--explain-plan` 打印 AND-OR 图与证明树：
+
+```bash
+python3 -m mvp.handle --task "三个词都要在同一个文件里" \
+  --verify "grep -q a /tmp/p.txt && grep -q b /tmp/p.txt && grep -q c /tmp/p.txt" \
+  --auto-plan --explain-plan
+# or=2 tried=2 depth=1
+# plan: AND(3 atoms) depth=1
+#   OR[1] naive cost=1.0 priority=1.00 -> fail
+#   OR[2] dedup cost=2.0 priority=0.50 -> pass (chosen)
+```
+
+priority = 1/cost：成本低的先试；AND 是合取原子，OR 是同一目标的不同做法。
 
 `--progress` 也可单独用于普通任务/候选，逐条打印子目标或候选的完成情况。
 
@@ -330,7 +343,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 315 条测试，约 1 秒
+make test        # 320 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 make verify-all  # 一键全量机检：测试/文档/状态/回归/对抗/覆盖/压测/校准
@@ -519,7 +532,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             315 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             320 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）

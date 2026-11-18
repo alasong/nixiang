@@ -34,6 +34,8 @@
 | T16 | 一键全量验证 verify-all | verify | g16 | `make verify-all` | rc=0 | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T17 | 从验收反推动作（--auto-plan） | backward | g17 | `python3 -m mvp.handle --task "给我一个包含 hello 的文件" --verify "grep -q hello /tmp/xm-auto.txt" --auto-plan` | rc=0，输出含 `formalized=backward-plan-v1` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T18 | 限宽限深搜索（同路径冲突回退） | search | g18 | `python3 -m mvp.handle --task "文件里要既有 a 又有 b" --verify "grep -q a /tmp/xm-s.txt && grep -q b /tmp/xm-s.txt" --auto-plan` | rc=0，输出含 `search=2` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
+| T19 | AND-OR 图 + 证明树 + priority(n) | planner | g19 | `python3 -m mvp.handle --task "三个词都要在同一个文件里" --verify "grep -q a /tmp/xm-p.txt && grep -q b /tmp/xm-p.txt && grep -q c /tmp/xm-p.txt" --auto-plan --explain-plan` | rc=0，输出含 `or=2 tried=2` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
+| T20 | 策略挖掘：按验收形状复用分支选择 | strategy | g20 | `python3 -m mvp.handle --task "文件里要既有 a 又有 b（第二例）" --verify "grep -q a /tmp/xm-p2.txt && grep -q b /tmp/xm-p2.txt" --auto-plan` | rc=0，输出含 `strategy=hit` | todo | 0 | — |
 
 ## 目标条目
 
@@ -58,6 +60,8 @@
 | g16 | 一键全量验证（单命令串起所有机检） |
 | g17 | 从验收谓词反推动作（符号逆向规划） |
 | g18 | 限宽限深搜索（同路径冲突回退） |
+| g19 | AND-OR 图 + 证明树 + priority(n) |
+| g20 | 策略挖掘：按验收形状复用分支选择 |
 
 ## 验收协议
 

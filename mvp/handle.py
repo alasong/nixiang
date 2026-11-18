@@ -819,6 +819,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="自动规划最多尝试几个候选方案")
     parser.add_argument("--depth", type=int, default=1,
                         help="自动规划允许的重分解深度（0=只有朴素方案）")
+    parser.add_argument("--explain-plan", action="store_true",
+                        help="打印 AND-OR 图与证明树")
     parser.add_argument("--id", default="", help="任务 id，缺省自动生成")
     parser.add_argument("--runs", default="", help="产物目录，缺省 runs/handle")
     parser.add_argument("--timeout", type=float, default=TIMEOUT)
@@ -827,26 +829,30 @@ def main(argv: list[str] | None = None) -> int:
     spec = TaskSpec(text=args.task, verify=args.verify, task_id=args.id)
     store = RunStore(Path(args.runs) if args.runs else RUNS_DIR / "handle")
     if args.auto_plan:
-        from .backward_plan import plan_text, plan_variants
-        variants = plan_variants(args.verify, depth=max(0, args.depth))
-        if not variants:
+        from .backward_plan import plan_text
+        from .planner import build_plan, render_plan
+        plan = build_plan(args.verify, depth=max(0, args.depth))
+        if plan is None:
             print("自动规划失败：验收条件里没有可反推动作（支持 grep -q / test -f / &&）")
             return 2
         width = max(1, args.width)
+        outcomes: list[bool] = []
         result = None
-        tried = 0
-        for variant in variants[:width]:
-            tried += 1
+        for branch in plan.branches[:width]:
             result = handle(spec, store=store, timeout=args.timeout,
                             agents=max(1, args.agents),
                             budget_ms=args.budget_ms,
-                            plan_text=plan_text(variant),
+                            plan_text=plan_text(list(branch.subgoals)),
                             progress=args.progress,
                             formalizer_vid="backward-plan-v1")
+            outcomes.append(result.passed)
             if result.passed:
                 break
         print(render(result, explain=args.explain, show_audit=args.audit))
-        print(f"search={tried}/{len(variants)}")
+        print(f"search={len(outcomes)}/{len(plan.branches)}")
+        print(f"or={len(plan.branches)} tried={len(outcomes)} depth={plan.depth}")
+        if args.explain_plan:
+            print(render_plan(plan, outcomes))
         return 0 if result is not None and result.passed else 1
     if args.formalize or args.formalize_from:
         try:
