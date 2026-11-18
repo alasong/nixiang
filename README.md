@@ -217,6 +217,16 @@ python3 -m mvp.calibrate --samples my_samples.jsonl --judge
 判据：`|judge - human| ≤ tolerance` 算一致；一致率低于 `--min-agree` 返回 1。
 它只负责算术与门限；**样本必须是你的人工标注**，否则就是自评自测。
 
+要补校准样本：复制 `tasks/calibration-template.jsonl`，按
+`{"task": ..., "content": ..., "human": 0-100}` 填 20–30 条，然后：
+
+```bash
+python3 -m mvp.calibrate --samples my_samples.jsonl --judge \
+  --tolerance 10 --min-agree 0.8
+```
+
+模板里的 `human` 是你打的分，不是模型的；同一任务可以有多份候选。
+
 验收反馈修复（T14）：
 
 ```bash
