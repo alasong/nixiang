@@ -27,10 +27,10 @@ python3 -m mvp
 想看测试：
 
 ```bash
-python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_validator mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek
+python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_diff mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_validator mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek
 ```
 
-143 个测试，同样零依赖。
+151 个测试，同样零依赖。
 
 ---
 
@@ -111,7 +111,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     backward.py      逆向推理：三态求值 + 短路 + 确定否定
     subgoal.py       L1 子目标：局部重分解，用尽才交棒
     budget.py        预算守恒（禁止透支、未用归还）
-    evaluator.py     留出集评估 + §6.4 判红门
+    evaluator.py     留出集评估 + §6.4 判红门 + 双跑差异归因（100% 可解释）
     router.py        只读聚合统计的路由决策
     sentry.py        渐进失效探针（只报警，不改数据）
     promotion.py     自动晋升（按复用记录）
@@ -126,7 +126,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     demo_dual_loop.py 双环三轮演示（探索 → 复核 → 晋升 → 复用）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
-  tests/             143 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             151 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
