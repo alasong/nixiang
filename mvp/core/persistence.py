@@ -109,9 +109,10 @@ class RunStore:
         self.experience_file = self.root / "experience.jsonl"
         self.usage_file = self.root / "usage.jsonl"
         self.retire_file = self.root / "retired.jsonl"
+        self.labels_file = self.root / "labels.jsonl"
         # 空文件也创建：下游消费者不必处理「文件不存在」这条路径
         for p in (self.traces_file, self.negative_file, self.experience_file,
-                  self.usage_file, self.retire_file):
+                  self.usage_file, self.retire_file, self.labels_file):
             p.touch()
 
     # -- 写
@@ -144,6 +145,23 @@ class RunStore:
         """淘汰墓碑：只追加一条记录，不改历史经验行（append-only 不变）。"""
         rec = {"shot_ids": sorted(shot_ids), "reason": reason, "logged_at": _now()}
         with self.retire_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    def append_label(self, task_id: str, labels: list[str] | set[str],
+                     source: str = "verifier", confidence: float = 1.0) -> None:
+        """验收结果落盘：这条任务应该被判为违反哪些规则。
+
+        写入者是真值来源（验证器判定、人工复核、下游反馈）；挖掘器只读。
+        append-only：同一任务的新结论追加一行，读取时取最新一条。
+        """
+        rec = {
+            "task_id": task_id,
+            "labels": sorted(labels),
+            "source": source,
+            "confidence": confidence,
+            "logged_at": _now(),
+        }
+        with self.labels_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     def append_usage(self, shot_ids: list[str], task_id: str, outcome: str,
@@ -184,6 +202,13 @@ class RunStore:
     def load_usage(self) -> list[dict]:
         return self._read(self.usage_file)
 
+    def load_labels(self) -> dict[str, set[str]]:
+        """当前标签视图：同一任务取最后一条（append-only，不删历史行）。"""
+        view: dict[str, set[str]] = {}
+        for rec in self._read(self.labels_file):
+            view[rec["task_id"]] = set(rec.get("labels", []))
+        return view
+
     def load_retired(self) -> set[str]:
         return {sid for rec in self._read(self.retire_file)
                 for sid in rec.get("shot_ids", [])}
@@ -219,6 +244,7 @@ class RunStore:
             "experience": len(self._read(self.experience_file)),
             "usage": len(self._read(self.usage_file)),
             "retired": len(self._read(self.retire_file)),
+            "labels": len(self._read(self.labels_file)),
         }
 
 

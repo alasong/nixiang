@@ -280,6 +280,33 @@ def traces_to_samples(traces, labels) -> tuple[list, int]:
     return samples, skipped
 
 
+def learn_from_ledger(sink, min_coverage: float = 0.5, **kwargs):
+    """从「轨迹 + 标签台账」挖规则：挖掘不再从测试里读真值。
+
+    标签覆盖率 = 有标签的轨迹数 / 轨迹总数。低于 min_coverage 直接不学：
+    台账没写全时学出来的规则是噪声，宁可空手回去等标签。
+
+    返回 (学到的规则, 数据面报告)；拒绝学习时 report 里带 reason。
+    """
+    traces = sink.load_traces()
+    labels = sink.load_labels()
+    samples, skipped = traces_to_samples(traces, labels)
+    coverage = len(samples) / len(traces) if traces else 0.0
+    report = {
+        "samples": len(samples),
+        "skipped_traces": skipped,
+        "coverage": coverage,
+    }
+    if coverage < min_coverage:
+        report["reason"] = (f"标签覆盖 {coverage:.0%} < {min_coverage:.0%}，"
+                            f"不学（等台账补全）")
+        report["unlearnable"] = {}
+        return [], report
+    learned, unlearnable = learn_with_report(samples, **kwargs)
+    report["unlearnable"] = unlearnable
+    return learned, report
+
+
 def demo() -> None:
     """训练集学规则，留出集验：零误伤、零漏报才算学到，学不出的如实报告。"""
     from ..core.tasks import build_tasks, ground_truth, task_facts
@@ -348,15 +375,18 @@ def demo() -> None:
             sink = RunStore(Path(d))
             run_path("A", tasks, truth, SetMatchVerifier(truth),
                      ExperienceStore(), use_shots=False, sink=sink)
+            # 验收结果落台账（合成域写入者是真值引擎；真实域换成人工复核/下游）
+            for task in tasks:
+                sink.append_label(task.id, sorted(truth[task.id]), source="truth-engine")
             traces = sink.load_traces()
-            samples2, skipped_traces = traces_to_samples(traces, labels=truth)
-        return traces, samples2, skipped_traces, learn_with_report(samples2)[0]
+            return traces, learn_from_ledger(sink)
 
-    traces, samples2, skipped_traces, learned2 = _learn_from_traces(tasks_train)
+    traces, (learned2, report) = _learn_from_traces(tasks_train)
     same = {x.rule.id: describe(x.rule.condition) for x in learned} == \
            {x.rule.id: describe(x.rule.condition) for x in learned2}
-    print(f"\n原料来源对照：{len(traces)} 条自跑轨迹 → {len(samples2)} 条带字段样本"
-          f"（跳过 {skipped_traces}）→ 学出 {len(learned2)} 条；与手工样本结果{'一致' if same else '不一致'}")
+    print(f"\n原料来源对照：{len(traces)} 条自跑轨迹 + 台账 {report['samples']} 条标签"
+          f"（跳过 {report['skipped_traces']}）→ 学出 {len(learned2)} 条；"
+          f"与手工样本结果{'一致' if same else '不一致'}")
     print(f"\n结论：{len(learned)}/7 条规则可从数据学出，"
           f"留出集零误伤零漏报；"
           + (f"{len(skipped)} 条已如实报告缺口" if skipped else "没有缺口"))
