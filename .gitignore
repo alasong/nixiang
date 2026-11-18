@@ -8,3 +8,6 @@ build/
 dist/
 *.egg-info/
 .dsh-contract.json
+
+# dsh-graph 本地数据（事件流/目标/附件）
+.dsh-graph/
