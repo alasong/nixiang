@@ -30,6 +30,10 @@ MAX_CANDIDATES = 600    # 每个标签参与两两组合的条件上限
 DATE_LIKE = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")   # 日期/月份：等值匹配是字面量捷径
 
 
+def _is_date(value) -> bool:
+    return isinstance(value, str) and bool(DATE_LIKE.match(value))
+
+
 @dataclass(frozen=True)
 class Learned:
     """学到的规则 + 它凭什么被接受：训练覆盖、分支、可读条件。"""
@@ -99,6 +103,28 @@ def feature_predicates(rows: list[dict]) -> list[Fact]:
                 lambda t, n=num, d=den: Fact(
                     f"{n}/{d} > {t:g}", (n, d),
                     lambda f, n=n, d=d, t=t: f[d] != 0 and f[n] / f[d] > t))
+
+    # 时间语义：日期字段之间的同期比较、日期列表是否越出起止区间。
+    # 这两个模板是通用时间特征（字段角色由数据类型判断），不是为某条规则写死的。
+    date_fields = [k for k, v in rows[0].items() if _is_date(v)]
+    for a, b in combinations(date_fields, 2):
+        facts.append(Fact(f"same_month({a},{b})", (a, b),
+                          lambda f, a=a, b=b: str(f[a])[:7] == str(f[b])[:7]))
+        facts.append(Fact(f"not_same_month({a},{b})", (a, b),
+                          lambda f, a=a, b=b: str(f[a])[:7] != str(f[b])[:7]))
+
+    list_fields = [k for k, v in rows[0].items()
+                   if isinstance(v, list) and v and all(_is_date(x) for x in v)]
+    for lst in list_fields:
+        for start, end in combinations(date_fields, 2):
+            facts.append(Fact(
+                f"outside({lst};{start},{end})", (lst, start, end),
+                lambda f, l=lst, s=start, e=end: any(
+                    str(d) < str(f[s]) or str(d) > str(f[e]) for d in f[l])))
+            facts.append(Fact(
+                f"inside({lst};{start},{end})", (lst, start, end),
+                lambda f, l=lst, s=start, e=end: all(
+                    str(f[s]) <= str(d) <= str(f[e]) for d in f[l])))
 
     for key, value in rows[0].items():
         if isinstance(value, bool):
@@ -304,7 +330,8 @@ def demo() -> None:
     missed = sum(1 for t in fresh_tasks if ground_truth(t) & set(skipped))
     print(f"\n引擎实跑（学出的 {len(activated)} 条规则 → 留出 200 条）："
           f"与真值一致的样本 {agree}/{len(fresh_tasks)}")
-    print(f"  缺失规则 {sorted(skipped)}：这批样本里有 {missed} 条真违规引擎判不出（漏判，已明示）")
+    if skipped:
+        print(f"  缺失规则 {sorted(skipped)}：这批样本里有 {missed} 条真违规引擎判不出（漏判，已明示）")
     # 原料来源对照：手工样本 vs 系统自己跑出来的轨迹
     import tempfile
     from pathlib import Path
@@ -331,7 +358,8 @@ def demo() -> None:
     print(f"\n原料来源对照：{len(traces)} 条自跑轨迹 → {len(samples2)} 条带字段样本"
           f"（跳过 {skipped_traces}）→ 学出 {len(learned2)} 条；与手工样本结果{'一致' if same else '不一致'}")
     print(f"\n结论：{len(learned)}/7 条规则可从数据学出，"
-          f"留出集零误伤零漏报；{len(skipped)} 条已如实报告缺口")
+          f"留出集零误伤零漏报；"
+          + (f"{len(skipped)} 条已如实报告缺口" if skipped else "没有缺口"))
 
 
 def main() -> None:

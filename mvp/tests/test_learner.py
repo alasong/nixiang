@@ -24,11 +24,10 @@ def by_id(learned) -> dict:
 
 
 class TestLearn(unittest.TestCase):
-    def test_recovers_core_rules(self) -> None:
+    def test_recovers_all_seven_rules(self) -> None:
+        """字段阈值 + 比值 + 时间语义特征下，7 条都能学出。"""
         learned = by_id(learn(corpus()))
-        # R1/R2/R3/R4/R6 的判据能被「字段 + 阈值」表达；R5/R7 需要日期区间、月份比较
-        self.assertTrue({"R1", "R2", "R3", "R4", "R6"} <= set(learned),
-                        f"只学到 {sorted(learned)}")
+        self.assertEqual(set(learned), {f"R{i}" for i in range(1, 8)})
 
     def test_learned_rules_are_pure_on_training(self) -> None:
         train = corpus()
@@ -46,13 +45,12 @@ class TestLearn(unittest.TestCase):
             self.assertEqual(r.counter, 0, f"{rid} 在留出集误伤：{r.row()}")
             self.assertEqual(r.fn, 0, f"{rid} 在留出集漏报：{r.row()}")
 
-    def test_unlearnable_labels_are_not_emitted(self) -> None:
+    def test_temporal_features_are_used(self) -> None:
         learned, skipped = learn_with_report(corpus())
         by_label = {item.rule.id: item for item in learned}
-        # 日期越界与跨月无说明需要区间/前缀特征，靠字段阈值表达不了，不能硬凑
-        self.assertNotIn("R5", by_label)
-        self.assertNotIn("R7", by_label)
-        self.assertEqual(set(skipped), {"R5", "R7"})
+        self.assertEqual(skipped, {})
+        self.assertIn("outside(", " ".join(by_label["R5"].branches[0]))
+        self.assertIn("not_same_month(", " ".join(by_label["R7"].branches[0]))
 
     def test_learned_rules_activate_through_gate(self) -> None:
         train = corpus()
