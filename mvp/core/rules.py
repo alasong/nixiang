@@ -9,12 +9,15 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Mapping
 
 TRUE = "true"
 FALSE = "false"
 UNKNOWN = "unknown"
+
+CAPACITY = 300      # 单域规则库上限（双引擎 v0.1 §7）：超限必须先做退役评估
+MIN_SUPPORT = 5     # candidate → active 的硬条件
 
 
 @dataclass(frozen=True)
@@ -42,11 +45,20 @@ class Any:
     name: str = "OR"
 
 
+class RuleError(RuntimeError):
+    """规则生命周期操作被拒。宁可直接拒绝，也不让不合格规则进 active。"""
+
+
 @dataclass(frozen=True)
 class Rule:
     id: str
     desc: str
     condition: object
+    status: str = "active"          # candidate | active | retired
+    source: str = "human"           # "human" | "llm:<trace_id>"
+    confidence: float = 1.0         # 来自回放统计
+    hit_count: int = 0
+    fail_count: int = 0
 
 
 def _fact(name: str, fields: tuple[str, ...]) -> Callable[..., Callable]:
@@ -93,19 +105,76 @@ RULES: tuple[Rule, ...] = (R1, R2, R3, R4, R5, R6, R7)
 
 
 class RuleStore:
-    """只读规则库。按 id 查询；按规则取字段依赖（给成本估计用）。"""
+    """规则库：查询 + 生命周期。
 
-    def __init__(self, rules: tuple[Rule, ...] = RULES) -> None:
+    引擎只看到 active；candidate 与 retired 保留可查，不参与推理。
+    迁移条件与容量上限在这里强制，调用方不能「先放进去再说」。
+    """
+
+    def __init__(self, rules: tuple[Rule, ...] = RULES,
+                 capacity: int = CAPACITY) -> None:
         self._rules = {r.id: r for r in rules}
+        self.capacity = capacity
+
+    # -- 查询（引擎侧）
 
     def all(self) -> tuple[Rule, ...]:
-        return tuple(self._rules.values())
+        """活跃规则。candidate / retired 不参与推理。"""
+        return tuple(r for r in self._rules.values() if r.status == "active")
 
     def get(self, rule_id: str) -> Rule:
+        """按 id 查任意状态。要判「能不能用」看 status，不要只看 get 成功。"""
         return self._rules[rule_id]
 
     def ids(self) -> tuple[str, ...]:
-        return tuple(self._rules)
+        return tuple(r.id for r in self.all())
+
+    def candidates(self) -> tuple[Rule, ...]:
+        return tuple(r for r in self._rules.values() if r.status == "candidate")
+
+    def retired(self) -> tuple[Rule, ...]:
+        return tuple(r for r in self._rules.values() if r.status == "retired")
+
+    def active_count(self) -> int:
+        return len(self.all())
+
+    # -- 生命周期（外环写，内环只读）
+
+    def register(self, rule: Rule, source: str = "human") -> Rule:
+        """登记为候选。同名 id 不允许覆盖，避免悄悄替换在用的规则。"""
+        if rule.id in self._rules:
+            raise RuleError(f"规则 {rule.id} 已存在，不能重复登记")
+        stored = replace(rule, status="candidate", source=source)
+        self._rules[rule.id] = stored
+        return stored
+
+    def activate(self, rule_id: str, support: int, counter: int) -> Rule:
+        """candidate → active：§7 硬条件 + 容量上限。"""
+        rule = self._require(rule_id)
+        if rule.status != "candidate":
+            raise RuleError(f"规则 {rule_id} 当前状态 {rule.status}，不是 candidate")
+        if support < MIN_SUPPORT:
+            raise RuleError(f"支持样本 {support} < {MIN_SUPPORT}，不能激活")
+        if counter != 0:
+            raise RuleError(f"有 {counter} 条误伤记录，不能激活")
+        if self.active_count() >= self.capacity:
+            raise RuleError(f"容量已满（{self.capacity}），先做退役评估再激活")
+        updated = replace(rule, status="active", hit_count=support)
+        self._rules[rule_id] = updated
+        return updated
+
+    def retire(self, rule_id: str, reason: str = "") -> Rule:
+        """retired 不是删除：记录保留，随时可查「当时为什么下线」。"""
+        rule = self._require(rule_id)
+        updated = replace(rule, status="retired")
+        self._rules[rule_id] = updated
+        return updated
+
+    def _require(self, rule_id: str) -> Rule:
+        try:
+            return self._rules[rule_id]
+        except KeyError:
+            raise RuleError(f"规则 {rule_id} 不存在") from None
 
 
 def rule_field_reads(rule: Rule) -> int:

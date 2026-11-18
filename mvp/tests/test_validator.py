@@ -8,7 +8,7 @@ from __future__ import annotations
 import unittest
 
 from mvp.core.contracts import Judgment, Status, Step, Trace
-from mvp.core.rules import All, Fact, Rule, RuleStore
+from mvp.core.rules import R1, All, Fact, Rule, RuleStore
 from mvp.core.tasks import build_tasks, ground_truth
 from mvp.loop.validator import (
     MIN_SUPPORT,
@@ -16,6 +16,7 @@ from mvp.loop.validator import (
     gate,
     replay,
     replay_all,
+    replay_and_activate,
     replay_shortcut,
     validate_candidates,
 )
@@ -168,6 +169,33 @@ class TestShortcutReplay(unittest.TestCase):
         r = replay_shortcut("H", traces)
         self.assertEqual(r.counter, 1)
         self.assertFalse(gate(r).ok)
+
+
+class TestReplayAndActivate(unittest.TestCase):
+    """验证通过 → 激活；验证否决 → 停在 candidate。"""
+
+    def _samples(self, target: str) -> list[Sample]:
+        return [Sample(t.id, t.__dict__,
+                       frozenset({target}) if "R1" in ground_truth(t) else frozenset())
+                for t in build_tasks(200)]
+
+    def test_valid_rule_is_activated(self) -> None:
+        store = RuleStore(())
+        cand = Rule("RX", "与 R1 同形", R1.condition)
+        d = replay_and_activate(store, cand, self._samples("RX"))
+        self.assertTrue(d.ok, d.reasons)
+        self.assertEqual(store.get("RX").status, "active")
+        self.assertIn("RX", {r.id for r in store.all()})
+
+    def test_invalid_rule_stays_candidate(self) -> None:
+        store = RuleStore(())
+        # 漏掉审批条件：已审批的超额单会被误伤
+        cand = Rule("RX", "漏审批条件",
+                    Fact("金额>5000", ("amount",), lambda f: f["amount"] > 5000))
+        d = replay_and_activate(store, cand, self._samples("RX"))
+        self.assertFalse(d.ok)
+        self.assertEqual(store.get("RX").status, "candidate")
+        self.assertNotIn("RX", {r.id for r in store.all()})
 
 
 class TestCandidateGate(unittest.TestCase):

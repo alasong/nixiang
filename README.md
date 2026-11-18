@@ -27,10 +27,10 @@ python3 -m mvp
 想看测试：
 
 ```bash
-python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_diff mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_validator mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek
+python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_diff mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_rules_lifecycle mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_validator mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek
 ```
 
-151 个测试，同样零依赖。
+161 个测试，同样零依赖。
 
 ---
 
@@ -97,7 +97,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
   core/              领域与存储层
     contracts.py     数据结构：Trace / Step / Verdict / Goal
     tasks.py         报销判定域 + 真值规则引擎（合成任务）
-    rules.py         规则库：7 条规则变成 AND-OR 条件树
+    rules.py         规则库：7 条规则变成 AND-OR 条件树 + 生命周期（candidate/active/retired，容量 300）
     verifier.py      判定型验证器
     llm.py           模型接口 + 仿真实现
     llm_deepseek.py  DeepSeek 真实 API 适配器
@@ -126,7 +126,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     demo_dual_loop.py 双环三轮演示（探索 → 复核 → 晋升 → 复用）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
-  tests/             151 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             161 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）

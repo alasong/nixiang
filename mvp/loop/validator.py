@@ -23,10 +23,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..core.contracts import Judgment, Status, Step, Trace
-from ..core.rules import All, Fact, Rule, RuleStore
+from ..core.rules import MIN_SUPPORT, All, Fact, Rule, RuleStore
 from .backward import UNKNOWN, VIOLATED, check
 
-MIN_SUPPORT = 5         # §7：candidate → active 的硬条件
 MAX_FALSE_ALARM = 0.05  # P2：误伤率 < 5%
 MIN_ACCURACY = 0.80     # P2：回放通过率 > 80%
 
@@ -170,6 +169,20 @@ def replay_shortcut(digest: str, traces: list[Trace]) -> Report:
         else:
             fp += 1
     return Report(digest, tp, fp, 0, 0, unknown)
+
+
+def replay_and_activate(store: RuleStore, rule: Rule,
+                        samples: list[Sample]) -> Decision:
+    """候选规则走完整链路：登记 → 回放 → 过门 → 激活。
+
+    过不了门就停在 candidate，不删也不改：下一轮数据补齐还能再验。
+    """
+    store.register(rule, source="replay")
+    report = replay(rule, samples)
+    decision = gate(report)
+    if decision.ok:
+        store.activate(rule.id, report.support, report.counter)
+    return decision
 
 
 def validate_candidates(sink) -> list[Decision]:
