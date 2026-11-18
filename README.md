@@ -27,10 +27,10 @@ python3 -m mvp
 想看测试：
 
 ```bash
-python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_diff mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_rules_lifecycle mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_validator mvp.tests.test_learner mvp.tests.test_trace_facts mvp.tests.test_labels mvp.tests.test_probe mvp.tests.test_sampling mvp.tests.test_adversarial mvp.tests.test_self_improve mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek
+python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_diff mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_rules_lifecycle mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_validator mvp.tests.test_learner mvp.tests.test_trace_facts mvp.tests.test_labels mvp.tests.test_probe mvp.tests.test_sampling mvp.tests.test_adversarial mvp.tests.test_self_improve mvp.tests.test_status_check mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek
 ```
 
-204 个测试，同样零依赖。
+207 个测试，同样零依赖。
 
 ---
 
@@ -72,6 +72,7 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 | `python3 -m mvp.loop.sampling --demo` | 无偏采样：抽样率与探索样本分布偏移（TV 距离） | 否 |
 | `make adversarial` | 对抗审计：漏/多/换近似答案的识别率，<99% 退出码 1 | 否 |
 | `python3 -m mvp.demos.self_improve` | 闭环：冷启动纯模型 → 学规则 → 符号优先（成本/质量对照） | 否 |
+| `make status` | 落地状态表机检：表里引用的命令是否都存在 | 否 |
 | `python3 -m mvp.loop.budget --demo` | 预算切分与守恒（禁止透支、未用归还） | 否 |
 | `python3 -m mvp.loop.maintenance --demo` | 维护回路：巡检 → 晋升 → 淘汰 → 路由（`--dir` 可重复跑） | 否 |
 | `python3 -m mvp.loop.self_bootstrap --demo` | 从自身轨迹导出任务清单并跑 H1 聚类（不依赖人手写） | 否 |
@@ -137,7 +138,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环演示：冷启动 → 学规则 → 切换符号优先
-  tests/             204 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             207 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
@@ -150,7 +151,7 @@ tools/
 
 data/                700KB 公开数据集（两个 parquet），已内置
                      Banking77 说明文件缺省时自动下载到 ~/.cache/harness-lab/
-docs/                设计文档、契约、基线声明、实验报告
+docs/                设计文档、契约、基线声明、实验报告、落地状态总表
 runs/                运行产物（自动生成，已 gitignore）
 ```
 
