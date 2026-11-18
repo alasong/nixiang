@@ -23,8 +23,9 @@ from ..core.contracts import Status
 from ..core.paths import RUNS_DIR
 from ..core.persistence import RunStore
 from .runner import build_experience, build_index, run_path, run_path_cached
+from .sampling import bias
 from ..core.store import ExperienceStore
-from ..core.tasks import Expense, build_tasks, ground_truth
+from ..core.tasks import Expense, build_tasks, ground_truth, structural_key
 from ..core.verifier import SetMatchVerifier
 
 HIT_ACTION = "rule_hit"  # C 路径命中时记的动作名，归因要用
@@ -192,6 +193,13 @@ def evaluate(tasks: list[Expense] | None = None, split: float = 0.6,
     cached = run_path_cached("C 指纹命中", heldout, truth, verifier, store,
                              index, sink=sink)
 
+    covered = {t.id for t in heldout if structural_key(t) in index}
+    sampling = {
+        "covered": len(covered),
+        "heldout": len(heldout),
+        "tv_no_sample": bias(heldout, covered, rate=0.0)["tv"],
+    }
+
     diffs = {"B": explain(base, enh, mode="shots"),
              "C": explain(base, cached, mode="cache")}
     return {
@@ -201,6 +209,7 @@ def evaluate(tasks: list[Expense] | None = None, split: float = 0.6,
         "gates": {"B": gate(base.stats, enh.stats), "C": gate(base.stats, cached.stats)},
         "diffs": diffs,
         "diff_summary": {k: summarize(v, len(heldout)) for k, v in diffs.items()},
+        "sampling": sampling,
     }
 
 
@@ -233,6 +242,10 @@ def _print_report(result: dict) -> None:
               f"可解释 {s['explained']}，不可解释 {s['unexplained']}   [{codes}]")
         if s["unexplained"]:
             print(f"    ⚠ 有 {s['unexplained']} 条差异落不进归因码，按缺陷处理")
+    s = result["sampling"]
+    print(f"\n无偏采样诊断：索引覆盖 {s['covered']}/{s['heldout']}，"
+          f"未覆盖样本 TV={s['tv_no_sample']:.2f}"
+          f"（不加抽样时探索样本的偏倚；抽样能压低它，见 sampling --demo）")
     for key in ("B", "C"):
         for d in result["diffs"][key]:
             if d.code in ("shot_harm", "unexpected") or (key == "C" and d.code == "costlier"):

@@ -59,6 +59,9 @@ class TestEvaluate(unittest.TestCase):
         self.assertEqual(set(result["gates"]), {"B", "C"})
         # 索引只用训练段：留出段的成功率为 C 路径的读数，不可能是 100% 之外的构造值
         self.assertLessEqual(result["paths"]["C"].stats["hit_rate"], 1.0)
+        sampling = result["sampling"]
+        self.assertLessEqual(sampling["covered"], sampling["heldout"])
+        self.assertGreaterEqual(sampling["tv_no_sample"], 0.0)
 
     def test_c_path_expected_to_pass_on_synthetic(self) -> None:
         """合成域上 C 路径应过门；不过门说明判据或数据被改坏了。"""
