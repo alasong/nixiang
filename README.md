@@ -231,8 +231,8 @@ python3 -m mvp.handle --task "写一行中文，恰好 20 个汉字，且包含 
 python3 -m mvp.handle ... --candidates 1 --repair 2 --progress
 ```
 
-对“有反馈就能改”的失败有用：3 个信息差任务 initial 0/3、修复救回 2/3
-（`rescue_rate=0.67`）；对精确计数/硬约束这类能力边界，反馈修复无效。
+对“有反馈就能改”的失败有用：3 个信息差任务 initial 0/3、修复救回 3/3
+（`rescue_rate=1.00`，含空响应重试）；对精确计数/硬约束这类能力边界，反馈修复无效。
 实录见 `docs/验收反馈修复_2026-11.md`。
 
 单条任务：
@@ -296,7 +296,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 300 条测试，约 1 秒
+make test        # 302 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 ```
@@ -483,7 +483,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             300 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             302 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）

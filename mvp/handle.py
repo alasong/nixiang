@@ -649,9 +649,14 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
         rc, output = _run_verify(spec.verify, cwd, timeout)
         repaired_here = 0
         while rc != 0 and repairer is not None and repaired_here < repair_rounds:
-            try:
-                fixed = repairer.repair(spec.text, data, output)
-            except Exception:
+            fixed = None
+            for _ in range(2):          # 空响应/异常重试一次，再放弃
+                try:
+                    fixed = repairer.repair(spec.text, data, output)
+                    break
+                except Exception:
+                    continue
+            if not fixed:
                 break
             data = fixed if fixed.endswith("\n") else fixed + "\n"
             path.write_text(data, encoding="utf-8")

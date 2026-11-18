@@ -58,6 +58,24 @@ class TestHandleRepair(unittest.TestCase):
             self.assertEqual(result.repaired, 0)
 
 
+class TestRepairRetry(unittest.TestCase):
+    def test_retries_empty_response(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            result = handle_candidates(
+                TaskSpec(text="写一行", verify=f"grep -qxF '{GOOD}' {root}/out.txt"),
+                root / "out.txt", [BAD],
+                repairer=FileRepairer(["", GOOD]), repair_rounds=1,
+                store=__import__("mvp.core.persistence",
+                                 fromlist=["RunStore"]).RunStore(root / "runs"))
+            self.assertTrue(result.passed)
+            self.assertEqual(result.repaired, 1)
+
+    def test_empty_response_raises(self) -> None:
+        with self.assertRaises(RepairError):
+            FileRepairer([""]).repair("t", BAD, "len=9")
+
+
 class TestRepairCLI(unittest.TestCase):
     def test_cli_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as d:

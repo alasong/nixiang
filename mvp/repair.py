@@ -59,6 +59,8 @@ class FileRepairer:
             raise RepairError("修复响应不足：修复轮数多于 repair JSONL 行数")
         response = self._responses[self._index]
         self._index += 1
+        if not response.strip():
+            raise RepairError("修复响应为空")
         return response
 
 
