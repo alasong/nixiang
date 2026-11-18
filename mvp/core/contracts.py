@@ -90,6 +90,7 @@ class Trace:
     outcome: Status = Status.UNKNOWN
     attempts: int = 0
     task_text: str = ""      # 任务描述原文（脱敏由调用方负责），H1 聚类要用
+    facts: dict = field(default_factory=dict)   # 任务的结构化输入（挖掘原料，脱敏由调用方负责）
 
     @property
     def total_cost(self) -> int:
@@ -103,6 +104,7 @@ class Trace:
             "verifier_vid": self.verifier_vid,
             "outcome": self.outcome.value,
             "attempts": self.attempts,
+            "facts": self.facts,
             "total_cost": self.total_cost,
             "steps": [s.to_dict() for s in self.steps],
         }

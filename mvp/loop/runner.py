@@ -17,7 +17,7 @@ from ..core.llm import LLMClient, Shot, SimulatedLLM
 from ..core.paths import RUNS_DIR
 from ..core.persistence import RunStore
 from ..core.store import ExperienceStore, ExperienceItem, Recorder
-from ..core.tasks import Expense, build_tasks, ground_truth, structural_key
+from ..core.tasks import Expense, build_tasks, ground_truth, structural_key, task_facts
 from ..core.verifier import SetMatchVerifier
 
 MAX_ATTEMPTS = 3
@@ -87,14 +87,14 @@ def run_path(
                       steps=trace.steps, snapshot_vid=trace.snapshot_vid,
                       verifier_vid=trace.verifier_vid,
                       outcome=trace.outcome, attempts=trace.attempts,
-                      task_text=trace.task_text)
+                      task_text=trace.task_text, facts=trace.facts)
         sink.append_trace(t)
         if t.outcome != Status.PASS:
             sink.append_negative(t, reason=_why(t))
 
     for task in tasks:
         trace = Trace(task_id=task.id, verifier_vid=verifier.vid,
-                      task_text=task.render()[:200])
+                      task_text=task.render()[:200], facts=task_facts(task))
         shots = store.retrieve(task.scene_tag(), k=2) if use_shots else []
         text = task.render()
 
@@ -226,7 +226,8 @@ def run_path_cached(
     hits = 0
 
     for task in tasks:
-        trace = Trace(task_id=task.id, verifier_vid=verifier.vid)
+        trace = Trace(task_id=task.id, verifier_vid=verifier.vid,
+                      facts=task_facts(task))
         key = structural_key(task)
 
         if key in index:

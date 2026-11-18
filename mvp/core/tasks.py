@@ -70,6 +70,11 @@ class Expense:
         )
 
 
+def task_facts(e: Expense) -> dict:
+    """任务的结构化输入（不含 id）。轨迹与挖掘共用这一份字段定义。"""
+    return {k: v for k, v in e.__dict__.items() if k != "id"}
+
+
 def ground_truth(e: Expense) -> set[str]:
     """规则引擎：唯一真值来源。验证器直接复用它。"""
     hit = set()

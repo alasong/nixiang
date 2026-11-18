@@ -110,7 +110,11 @@ def feature_predicates(rows: list[dict]) -> list[Fact]:
             if all(DATE_LIKE.match(str(row[key])) for row in rows):
                 # 日期/月份字段需要区间与前缀特征；展开成等值会学出字面量捷径
                 continue
-            for option in sorted({row[key] for row in rows}):
+            options = sorted({row[key] for row in rows})
+            if len(options) > max(10, len(rows) // 2):
+                # 近乎唯一的字符串是标识符，不可能是可推广的条件
+                continue
+            for option in options:
                 facts.append(Fact(f"{key} == {option}", (key,),
                                   lambda f, k=key, v=option: f[k] == v))
                 facts.append(Fact(f"{key} != {option}", (key,),
@@ -232,16 +236,38 @@ def learn_with_report(samples, max_size: int = MAX_SIZE,
     return learned, skipped
 
 
+def traces_to_samples(traces, labels) -> tuple[list, int]:
+    """把带 facts 的轨迹转成带标签样本。
+
+    labels 是 {task_id: 标签集合}；真值由验证器/下游给，不从轨迹里猜。
+    没有 facts 的轨迹（旧格式）跳过并计数——不能拿空字段去学，那是噪声。
+    """
+    from .validator import Sample
+
+    samples, skipped = [], 0
+    for trace in traces:
+        label = labels.get(trace.task_id)
+        if not trace.facts or label is None:
+            skipped += 1
+            continue
+        samples.append(Sample(trace.task_id, trace.facts, frozenset(label)))
+    return samples, skipped
+
+
 def demo() -> None:
     """训练集学规则，留出集验：零误伤、零漏报才算学到，学不出的如实报告。"""
-    from ..core.tasks import build_tasks, ground_truth
+    from ..core.tasks import build_tasks, ground_truth, task_facts
+    from .backward import describe
     from .validator import Sample, gate, replay
 
     def corpus(seed: int):
-        return [Sample(t.id, t.__dict__, frozenset(ground_truth(t)))
-                for t in build_tasks(200, seed=seed)]
+        tasks = build_tasks(200, seed=seed)
+        samples = [Sample(t.id, task_facts(t), frozenset(ground_truth(t)))
+                   for t in tasks]
+        return tasks, samples
 
-    train, fresh = corpus(42), corpus(7)
+    tasks_train, train = corpus(42)
+    _, fresh = corpus(7)
     learned, skipped = learn_with_report(train)
 
     print("规则挖掘（P1）：200 条训练 → 200 条留出（不同抽样）")
@@ -279,6 +305,31 @@ def demo() -> None:
     print(f"\n引擎实跑（学出的 {len(activated)} 条规则 → 留出 200 条）："
           f"与真值一致的样本 {agree}/{len(fresh_tasks)}")
     print(f"  缺失规则 {sorted(skipped)}：这批样本里有 {missed} 条真违规引擎判不出（漏判，已明示）")
+    # 原料来源对照：手工样本 vs 系统自己跑出来的轨迹
+    import tempfile
+    from pathlib import Path
+
+    from ..core.persistence import RunStore
+    from ..core.store import ExperienceStore
+    from ..core.verifier import SetMatchVerifier
+    from .runner import run_path
+
+    truth = {t.id: ground_truth(t) for t in tasks_train}
+
+    def _learn_from_traces(tasks):
+        with tempfile.TemporaryDirectory() as d:
+            sink = RunStore(Path(d))
+            run_path("A", tasks, truth, SetMatchVerifier(truth),
+                     ExperienceStore(), use_shots=False, sink=sink)
+            traces = sink.load_traces()
+            samples2, skipped_traces = traces_to_samples(traces, labels=truth)
+        return traces, samples2, skipped_traces, learn_with_report(samples2)[0]
+
+    traces, samples2, skipped_traces, learned2 = _learn_from_traces(tasks_train)
+    same = {x.rule.id: describe(x.rule.condition) for x in learned} == \
+           {x.rule.id: describe(x.rule.condition) for x in learned2}
+    print(f"\n原料来源对照：{len(traces)} 条自跑轨迹 → {len(samples2)} 条带字段样本"
+          f"（跳过 {skipped_traces}）→ 学出 {len(learned2)} 条；与手工样本结果{'一致' if same else '不一致'}")
     print(f"\n结论：{len(learned)}/7 条规则可从数据学出，"
           f"留出集零误伤零漏报；{len(skipped)} 条已如实报告缺口")
 

@@ -59,6 +59,7 @@ def decode_trace(d: dict) -> Trace:
     return Trace(
         task_id=d["task_id"],
         task_text=d.get("task_text", ""),
+        facts=d.get("facts") or {},
         steps=steps,
         snapshot_vid=d.get("snapshot_vid", "v0"),
         verifier_vid=d.get("verifier_vid", "vf0"),
