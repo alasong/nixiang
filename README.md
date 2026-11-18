@@ -299,6 +299,7 @@ python3 -m mvp
 make test        # 302 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
+make verify-all  # 一键全量机检：测试/文档/状态/回归/对抗/覆盖/压测/校准
 ```
 
 想先看「这套东西到底能干什么」，跑闭环：

@@ -1,6 +1,6 @@
 PY ?= python3
 
-.PHONY: help setup test docs-check status regress adversarial demo demo-fresh real-check cluster clean
+.PHONY: help setup test docs-check status regress adversarial verify-all demo demo-fresh real-check cluster clean
 
 help:
 	@echo "make setup       建 venv 并装依赖（等同 ./bootstrap.sh）"
@@ -9,6 +9,7 @@ help:
 	@echo "make status      检查落地状态表引用的命令是否都存在"
 	@echo "make regress     验证器漂移回归（已知真值语料，红了退出码 1）"
 	@echo "make adversarial 对抗审计（近似答案识别率 <99% 退出码 1）"
+	@echo "make verify-all  一键跑完全部机检（测试/文档/状态/回归/对抗/覆盖/压测/校准）"
 	@echo "make demo        三路径对照实验（纯标准库，无需 venv）"
 	@echo "make demo-fresh  同上，但先清空 runs/"
 	@echo "make real-check  真实数据集复现（需 numpy/pandas/pyarrow/sklearn）"
@@ -44,6 +45,16 @@ real-check:
 
 cluster:
 	$(PY) tools/cluster_check.py --demo
+
+verify-all:
+	$(MAKE) test
+	$(MAKE) docs-check
+	$(MAKE) status
+	$(MAKE) regress
+	$(MAKE) adversarial
+	$(PY) -m mvp.board coverage
+	$(PY) -m mvp.stress --cases tasks/M4/cases.jsonl --repeat 1
+	$(PY) -m mvp.calibrate --samples tasks/T13-samples.jsonl --judge-from tasks/T13-judge.jsonl
 
 clean:
 	rm -rf runs
