@@ -25,6 +25,7 @@ import re
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +75,10 @@ class HandleResult:
     subgoals_passed: int = 0
     plan_reused: bool = False
     model_calls: int = 0
+    agents_used: int = 1
+    stop_reason: str = ""
+    wall_ms: int = 0
+    audit: list[tuple[str, bool]] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -275,6 +280,37 @@ def _load_plan(store: RunStore, spec: TaskSpec) -> CachedPlan | None:
         found.get("source", ""))
 
 
+# ---------------------------------------------------------------- 过程审计
+
+def _process_audit(result: HandleResult, trace: Trace, spec: TaskSpec,
+                   subs: list[SubGoal], agents: int) -> list[tuple[str, bool]]:
+    """过程层 6 项：入口、验收、分解、并发、归因、留痕。"""
+    steps = trace.steps
+    verify_steps = [s for s in steps if s.action in ("verify", "subgoal")]
+    attribution = all(
+        (s.output.get("rc") is not None) or s.output.get("error")
+        for s in steps if s.judgment in (Judgment.RETRY, Judgment.GIVEUP))
+    expected = min(agents, max(1, len(subs)))
+    concurrency = result.agents_used == expected or (
+        result.stop_reason in ("write_conflict", "single")
+        and result.agents_used == 1)
+    return [
+        ("入口", result.status != "unsupported" and result.executor != "none"),
+        ("验收", bool(spec.verify) and bool(verify_steps)),
+        ("分解", result.status != "unsupported"
+                and (bool(subs) or result.executor != "none")),
+        ("并发", result.agents_used >= 1 and concurrency),
+        ("归因", attribution),
+        ("留痕", bool(steps)),
+    ]
+
+
+def _finish(result: HandleResult, trace: Trace, spec: TaskSpec,
+            subs: list[SubGoal], agents: int) -> HandleResult:
+    result.audit = _process_audit(result, trace, spec, subs, agents)
+    return result
+
+
 # ---------------------------------------------------------------- 主流程
 
 def new_task_id() -> str:
@@ -302,7 +338,8 @@ def _run_verify(command: str, cwd: str | Path, timeout: float) -> tuple[int, str
 def handle(spec: TaskSpec, executor: Executor | None = None,
            store: RunStore | None = None, cwd: str | Path = ROOT,
            timeout: float = TIMEOUT,
-           cached: CachedPlan | None = None) -> HandleResult:
+           cached: CachedPlan | None = None,
+           agents: int = 1) -> HandleResult:
     """执行一条任务并用外部命令验收；无论成败都落一条轨迹。"""
     executor = executor or FileWriteExecutor()
     store = store or RunStore(RUNS_DIR / "handle")
@@ -320,7 +357,7 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
 
     if subgoals:
         return _handle_subgoals(spec, trace, subgoals, source, executor,
-                                store, cwd, timeout, cached)
+                                store, cwd, timeout, cached, agents)
 
     parsed = executor.match(content)
     if parsed is None:
@@ -329,8 +366,10 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
                                  Judgment.GIVEUP, 0))
         trace.outcome = Status.UNKNOWN
         store.append_trace(trace)
-        return HandleResult(spec=spec, trace=trace, status="unsupported",
-                            executor="none")
+        return _finish(HandleResult(spec=spec, trace=trace, status="unsupported",
+                                    executor="none", agents_used=0,
+                                    stop_reason="unsupported"),
+                       trace, spec, [], agents)
 
     trace.attempts = 1
     started = time.monotonic()
@@ -344,8 +383,9 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
         trace.outcome = Status.FAIL
         store.append_trace(trace)
         store.append_negative(trace, f"execute_error: {type(exc).__name__}")
-        return HandleResult(spec=spec, trace=trace, status="failed",
-                            executor=executor.name)
+        return _finish(HandleResult(spec=spec, trace=trace, status="failed",
+                                    executor=executor.name),
+                       trace, spec, [], agents)
 
     trace.steps.append(_step(f"{task_id}#exec", "write_file"
                              if executor.name == "write_file" else "execute",
@@ -363,18 +403,40 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
 
     if rc == 0 and cached is None:
         _save_plan(store, spec, [], "")
-    return HandleResult(spec=spec, trace=trace,
-                        status="passed" if rc == 0 else "failed",
-                        executor=executor.name, verify_rc=rc,
-                        verify_output=output, execution=execution,
-                        plan_reused=cached is not None)
+    return _finish(HandleResult(spec=spec, trace=trace,
+                                status="passed" if rc == 0 else "failed",
+                                executor=executor.name, verify_rc=rc,
+                                verify_output=output, execution=execution,
+                                plan_reused=cached is not None,
+                                stop_reason="single"),
+                   trace, spec, [], agents)
+
+
+def _run_subgoal(sub: SubGoal, executor: Executor, cwd: str | Path,
+                 timeout: float) -> dict:
+    """执行一个子目标（动作 + 自身验收），返回结果字典；不写 trace（线程安全）。"""
+    started = time.monotonic()
+    if sub.action:
+        parsed = executor.match(sub.action)
+        if parsed is None:
+            return {"ok": False, "error": "no_executor",
+                    "ms": int((time.monotonic() - started) * 1000)}
+        try:
+            executor.run(parsed)
+        except Exception as exc:
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}",
+                    "ms": int((time.monotonic() - started) * 1000)}
+    rc, output = _run_verify(sub.verify, cwd, timeout)
+    return {"ok": rc == 0, "rc": rc, "output": output,
+            "ms": int((time.monotonic() - started) * 1000)}
 
 
 def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
                      source: str, executor: Executor, store: RunStore,
                      cwd: str | Path, timeout: float,
-                     cached: CachedPlan | None = None) -> HandleResult:
-    """逐个执行子目标、逐个验收；任务文件来源再跑一次全局验收。"""
+                     cached: CachedPlan | None = None,
+                     agents: int = 1) -> HandleResult:
+    """执行子目标；能并行就并行（写域互斥），最后跑全局验收。"""
     task_id = trace.task_id
     trace.attempts = 1
     execution: dict = {}
@@ -387,8 +449,10 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
                                      Judgment.GIVEUP, 0))
             trace.outcome = Status.UNKNOWN
             store.append_trace(trace)
-            return HandleResult(spec=spec, trace=trace, status="unsupported",
-                                executor="none")
+            return _finish(HandleResult(spec=spec, trace=trace,
+                                        status="unsupported", executor="none",
+                                        agents_used=0, stop_reason="unsupported"),
+                           trace, spec, subgoals, agents)
         try:
             execution = executor.run(parsed)
         except Exception as exc:
@@ -398,43 +462,52 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
             trace.outcome = Status.FAIL
             store.append_trace(trace)
             store.append_negative(trace, f"execute_error: {type(exc).__name__}")
-            return HandleResult(spec=spec, trace=trace, status="failed",
-                                executor=executor.name)
+            return _finish(HandleResult(spec=spec, trace=trace, status="failed",
+                                        executor=executor.name),
+                           trace, spec, subgoals, agents)
+
+    # 写域冲突检测：同一路径的多个子目标不能并行
+    paths: list[str] = []
+    for sub in subgoals:
+        if sub.action:
+            parsed = executor.match(sub.action)
+            if parsed is not None:
+                paths.append(parsed["path"])
+    conflict = len(paths) != len(set(paths))
+    parallel = agents > 1 and len(subgoals) > 1 and not conflict
+    if parallel:
+        stop_reason = ""
+    elif conflict:
+        stop_reason = "write_conflict"
+    elif len(subgoals) == 1:
+        stop_reason = "single"
+    else:
+        stop_reason = "serial"
+    workers = min(agents, len(subgoals)) if parallel else 1
+
+    started = time.monotonic()
+    if parallel:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            outcomes = list(pool.map(
+                lambda sub: _run_subgoal(sub, executor, cwd, timeout),
+                subgoals))
+    else:
+        outcomes = [_run_subgoal(sub, executor, cwd, timeout)
+                    for sub in subgoals]
+    wall_ms = int((time.monotonic() - started) * 1000)
 
     passed = 0
     last_rc = -1
-    for index, sub in enumerate(subgoals, 1):
-        ok = True
-        started = time.monotonic()
-        if sub.action:
-            parsed = executor.match(sub.action)
-            if parsed is None:
-                ok = False
-                trace.steps.append(_step(
-                    f"{task_id}#sg{index}", "subgoal",
-                    {"label": sub.label, "action": sub.action,
-                     "error": "no_executor"}, Judgment.GIVEUP, 0))
-            else:
-                try:
-                    executor.run(parsed)
-                except Exception as exc:
-                    ok = False
-                    trace.steps.append(_step(
-                        f"{task_id}#sg{index}", "subgoal",
-                        {"label": sub.label, "action": sub.action,
-                         "error": f"{type(exc).__name__}: {exc}"},
-                        Judgment.GIVEUP,
-                        int((time.monotonic() - started) * 1000)))
-        if ok:
-            rc, output = _run_verify(sub.verify, cwd, timeout)
-            last_rc = rc
-            ok = rc == 0
-            trace.steps.append(_step(
-                f"{task_id}#sg{index}", "subgoal",
-                {"label": sub.label, "verify": sub.verify, "rc": rc,
-                 "output": output}, Judgment.OK if ok else Judgment.RETRY,
-                int((time.monotonic() - started) * 1000)))
-        if ok:
+    for index, (sub, oc) in enumerate(zip(subgoals, outcomes), 1):
+        if "rc" in oc:
+            last_rc = oc["rc"]
+        out = {"label": sub.label, "verify": sub.verify}
+        out.update({k: oc[k] for k in ("rc", "output", "error") if k in oc})
+        judgment = (Judgment.OK if oc["ok"]
+                    else (Judgment.GIVEUP if oc.get("error") else Judgment.RETRY))
+        trace.steps.append(_step(f"{task_id}#sg{index}", "subgoal", out,
+                                 judgment, oc["ms"]))
+        if oc["ok"]:
             passed += 1
 
     global_rc = 0
@@ -454,13 +527,16 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
 
     if all_ok and cached is None:
         _save_plan(store, spec, subgoals, source)
-    return HandleResult(spec=spec, trace=trace,
-                        status="passed" if all_ok else "failed",
-                        executor=executor.name if source == "verify" else "plan",
-                        verify_rc=global_rc if source == "file" else last_rc,
-                        verify_output=output, execution=execution,
-                        subgoals=subgoals, subgoals_passed=passed,
-                        plan_reused=cached is not None)
+    return _finish(HandleResult(
+        spec=spec, trace=trace,
+        status="passed" if all_ok else "failed",
+        executor=executor.name if source == "verify" else "plan",
+        verify_rc=global_rc if source == "file" else last_rc,
+        verify_output=output, execution=execution,
+        subgoals=subgoals, subgoals_passed=passed,
+        plan_reused=cached is not None,
+        agents_used=workers, stop_reason=stop_reason, wall_ms=wall_ms),
+        trace, spec, subgoals, agents)
 
 
 def handle_twice(spec: TaskSpec, executor: Executor | None = None,
@@ -475,7 +551,17 @@ def handle_twice(spec: TaskSpec, executor: Executor | None = None,
     return first, second
 
 
-def render(result: HandleResult, explain: bool = False) -> str:
+def _audit_lines(result: HandleResult) -> list[str]:
+    ok = sum(1 for _, passed in result.audit if passed)
+    detail = " ".join(f"{name}={'✓' if passed else '✗'}"
+                      for name, passed in result.audit)
+    return [f"  agents={result.agents_used}  wall_ms={result.wall_ms}"
+            + (f"  stop={result.stop_reason}" if result.stop_reason else ""),
+            f"process {ok}/{len(result.audit)}  {detail}"]
+
+
+def render(result: HandleResult, explain: bool = False,
+           show_audit: bool = False) -> str:
     lines = [f"任务 {result.trace.task_id}",
              f"  执行  {result.executor}"]
     if result.plan_reused:
@@ -484,6 +570,8 @@ def render(result: HandleResult, explain: bool = False) -> str:
         lines.append("unsupported: 没有执行器能处理这条任务")
         lines.append("  可用模式：在 <路径> 写入 <内容> / 在 <路径> 追加 <内容> / "
                      "在 <路径> 末尾加一行 <内容>")
+        if show_audit:
+            lines.extend(_audit_lines(result))
         return "\n".join(lines)
     if result.subgoals:
         lines.append(f"  子目标 {result.subgoals_passed}/{len(result.subgoals)}")
@@ -495,6 +583,8 @@ def render(result: HandleResult, explain: bool = False) -> str:
     if result.verify_output:
         lines.append("  输出  " + result.verify_output.replace("\n", " | "))
     lines.append("verify: " + ("pass" if result.passed else "fail"))
+    if show_audit:
+        lines.extend(_audit_lines(result))
     return "\n".join(lines)
 
 
@@ -505,6 +595,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--explain", action="store_true", help="打印分解出的子目标")
     parser.add_argument("--twice", action="store_true",
                         help="连跑两次，第二次复用计划缓存")
+    parser.add_argument("--agents", type=int, default=1,
+                        help="并行执行子目标的 worker 数（默认 1）")
+    parser.add_argument("--audit", action="store_true",
+                        help="打印过程审计 6 项")
     parser.add_argument("--id", default="", help="任务 id，缺省自动生成")
     parser.add_argument("--runs", default="", help="产物目录，缺省 runs/handle")
     parser.add_argument("--timeout", type=float, default=TIMEOUT)
@@ -520,8 +614,9 @@ def main(argv: list[str] | None = None) -> int:
         print("model_calls=0")
         result = second
     else:
-        result = handle(spec, store=store, timeout=args.timeout)
-        print(render(result, explain=args.explain))
+        result = handle(spec, store=store, timeout=args.timeout,
+                        agents=max(1, args.agents))
+        print(render(result, explain=args.explain, show_audit=args.audit))
     if result.status == "unsupported":
         return 2
     return 0 if result.passed else 1

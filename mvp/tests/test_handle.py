@@ -310,5 +310,82 @@ class TestTwice(unittest.TestCase):
             self.assertIn("计划缓存", proc.stdout)
 
 
+class TestParallelAgents(unittest.TestCase):
+    def _fixture(self, root: Path) -> Path:
+        md = root / "task.md"
+        md.write_text(
+            "## 子目标\n\n"
+            f"1. 在 {root}/a.txt 写入 aa\n   验收：sleep 0.5 && test -f {root}/a.txt\n"
+            f"2. 在 {root}/b.txt 写入 bb\n   验收：sleep 0.5 && test -f {root}/b.txt\n"
+            f"3. 在 {root}/c.txt 写入 cc\n   验收：sleep 0.5 && test -f {root}/c.txt\n",
+            encoding="utf-8")
+        return md
+
+    def test_parallel_is_faster_than_serial(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            md = self._fixture(root)
+            store = RunStore(root / "runs")
+            par = handle(TaskSpec(text=str(md), verify="true"),
+                         store=store, agents=3)
+            self.assertTrue(par.passed)
+            self.assertEqual(par.agents_used, 3)
+            self.assertLess(par.wall_ms, 1200)
+            ser = handle(TaskSpec(text=str(md), verify="true"),
+                         store=store, agents=1)
+            self.assertGreater(ser.wall_ms, 1300)
+
+    def test_write_conflict_falls_back_to_serial(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            md = root / "task.md"
+            md.write_text(
+                "## 子目标\n\n"
+                f"1. 在 {root}/same.txt 写入 a\n"
+                f"   验收：grep -q a {root}/same.txt\n"
+                f"2. 在 {root}/same.txt 追加 b\n"
+                f"   验收：grep -q b {root}/same.txt\n",
+                encoding="utf-8")
+            result = handle(TaskSpec(text=str(md), verify="true"),
+                            store=RunStore(root / "runs"), agents=3)
+            self.assertTrue(result.passed)
+            self.assertEqual(result.agents_used, 1)
+            self.assertEqual(result.stop_reason, "write_conflict")
+
+
+class TestProcessAudit(unittest.TestCase):
+    def test_six_items_on_normal_run(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            target = root / "x.txt"
+            result = handle(TaskSpec(text=f"在 {target} 写入 x",
+                                     verify=f"grep -q x {target}"),
+                            store=RunStore(root / "runs"))
+            self.assertEqual(len(result.audit), 6)
+            self.assertTrue(all(ok for _, ok in result.audit))
+            self.assertIn("process 6/6", render(result, show_audit=True))
+
+    def test_unsupported_is_not_six(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            result = handle(TaskSpec(text="帮我写一份报告", verify="true"),
+                            store=RunStore(Path(d) / "runs"))
+            self.assertLess(sum(1 for _, ok in result.audit if ok), 6)
+
+
+class TestAgentsCLI(unittest.TestCase):
+    def test_cli_agents_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, HARNESS_LAB_RUNS=d)
+            proc = subprocess.run(
+                [sys.executable, "-m", "mvp.handle",
+                 "--task", str(ROOT / "tasks" / "T7.md"),
+                 "--verify", "make docs-check",
+                 "--agents", "3", "--audit"],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("process 6/6", proc.stdout)
+            self.assertIn("agents=3", proc.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

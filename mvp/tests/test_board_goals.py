@@ -36,15 +36,17 @@ def fake_board(tc: unittest.TestCase) -> board.Board:
 class TestGoalCoverage(unittest.TestCase):
     def test_goals_table_is_parsed(self) -> None:
         b = board.load(REAL)
-        self.assertEqual([g.gid for g in b.goals],
-                         ["g0", "g1", "g2", "g3", "g4", "g5"])
+        gids = [g.gid for g in b.goals]
+        self.assertEqual(gids[:6], ["g0", "g1", "g2", "g3", "g4", "g5"])
+        self.assertIn("g6", gids)
         self.assertEqual(board.get(b, "T6").covers, "g0")
 
     def test_no_gaps_on_real_board(self) -> None:
-        result = board.coverage(board.load(REAL))
+        b = board.load(REAL)
+        result = board.coverage(b)
         self.assertEqual(result["gaps"], [])
         self.assertTrue(result["ok"])
-        self.assertEqual(len(result["items"]), 6)
+        self.assertEqual(len(result["items"]), len(b.goals))
 
     def test_gap_when_goal_not_claimed(self) -> None:
         b = fake_board(self)

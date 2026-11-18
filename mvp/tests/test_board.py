@@ -37,8 +37,9 @@ def fake_board(tc: unittest.TestCase) -> board.Board:
 class TestParse(unittest.TestCase):
     def test_parses_real_board(self) -> None:
         b = board.load(REAL)
-        self.assertEqual([c.id for c in b.cards],
-                         ["T1", "T2", "T3", "T4", "T5", "T6"])
+        ids = [c.id for c in b.cards]
+        self.assertEqual(ids[:6], ["T1", "T2", "T3", "T4", "T5", "T6"])
+        self.assertIn("T7", ids)
         self.assertEqual(b.cards[0].status, "done")
         self.assertIn("R1", b.cards[0].expect)
         self.assertIn("mvp.handle", b.cards[1].command)

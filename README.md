@@ -116,6 +116,16 @@ python3 -m mvp.handle --task "在 /tmp/xm-hello.txt 写入 hello" \
 `model_calls=0` 在 M0/M1 是结构性的（这两层本来不调模型）；接真实模型后，
 这个计数才有区分力。
 
+多 Agent 并行子目标（M2a）：写域不重叠时 `--agents N` 真并行；`--audit` 打过程审计：
+
+```bash
+python3 -m mvp.handle --task tasks/T7.md --verify "make docs-check" --agents 3 --audit
+# agents=3  wall_ms=323
+# process 6/6  入口=✓ 验收=✓ 分解=✓ 并发=✓ 归因=✓ 留痕=✓
+```
+
+写域冲突（多个子目标写同一路径）会自动退回串行，并打印 `stop=write_conflict`。
+
 单条任务：
 
 ```bash
@@ -177,7 +187,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 258 条测试，约 1 秒
+make test        # 263 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 ```
@@ -356,7 +366,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             258 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             263 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
