@@ -815,6 +815,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="从 JSONL 读离线修复响应（可复现）")
     parser.add_argument("--auto-plan", action="store_true",
                         help="从验收谓词反推动作（grep -q / test -f / &&）")
+    parser.add_argument("--width", type=int, default=2,
+                        help="自动规划最多尝试几个候选方案")
+    parser.add_argument("--depth", type=int, default=1,
+                        help="自动规划允许的重分解深度（0=只有朴素方案）")
     parser.add_argument("--id", default="", help="任务 id，缺省自动生成")
     parser.add_argument("--runs", default="", help="产物目录，缺省 runs/handle")
     parser.add_argument("--timeout", type=float, default=TIMEOUT)
@@ -823,18 +827,27 @@ def main(argv: list[str] | None = None) -> int:
     spec = TaskSpec(text=args.task, verify=args.verify, task_id=args.id)
     store = RunStore(Path(args.runs) if args.runs else RUNS_DIR / "handle")
     if args.auto_plan:
-        from .backward_plan import plan_from_verify, plan_text
-        subgoals = plan_from_verify(args.verify)
-        if not subgoals:
+        from .backward_plan import plan_text, plan_variants
+        variants = plan_variants(args.verify, depth=max(0, args.depth))
+        if not variants:
             print("自动规划失败：验收条件里没有可反推动作（支持 grep -q / test -f / &&）")
             return 2
-        result = handle(spec, store=store, timeout=args.timeout,
-                        agents=max(1, args.agents),
-                        budget_ms=args.budget_ms,
-                        plan_text=plan_text(subgoals), progress=args.progress,
-                        formalizer_vid="backward-plan-v1")
+        width = max(1, args.width)
+        result = None
+        tried = 0
+        for variant in variants[:width]:
+            tried += 1
+            result = handle(spec, store=store, timeout=args.timeout,
+                            agents=max(1, args.agents),
+                            budget_ms=args.budget_ms,
+                            plan_text=plan_text(variant),
+                            progress=args.progress,
+                            formalizer_vid="backward-plan-v1")
+            if result.passed:
+                break
         print(render(result, explain=args.explain, show_audit=args.audit))
-        return 0 if result.passed else 1
+        print(f"search={tried}/{len(variants)}")
+        return 0 if result is not None and result.passed else 1
     if args.formalize or args.formalize_from:
         try:
             formalizer = (FileFormalizer(args.formalize_from)

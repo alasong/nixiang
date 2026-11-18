@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mvp.backward_plan import plan_from_verify, plan_text
+from mvp.backward_plan import plan_from_verify, plan_text, plan_variants
 from mvp.handle import parse_task_file
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,6 +45,58 @@ class TestPlanText(unittest.TestCase):
         parsed = parse_task_file(plan_text(subs))
         self.assertEqual(len(parsed), 2)
         self.assertEqual(parsed[0].verify, "grep -q a /tmp/a")
+
+
+class TestVariants(unittest.TestCase):
+    def test_same_path_has_two_variants(self) -> None:
+        variants = plan_variants("grep -q a /tmp/s.txt && grep -q b /tmp/s.txt",
+                                 depth=1)
+        self.assertEqual(len(variants), 2)
+        self.assertIn("写入", variants[0][1].action)
+        self.assertIn("追加", variants[1][1].action)
+
+    def test_depth_zero_only_naive(self) -> None:
+        variants = plan_variants("grep -q a /tmp/s.txt && grep -q b /tmp/s.txt",
+                                 depth=0)
+        self.assertEqual(len(variants), 1)
+
+    def test_distinct_paths_single_variant(self) -> None:
+        variants = plan_variants("grep -q a /tmp/a.txt && grep -q b /tmp/b.txt",
+                                 depth=1)
+        self.assertEqual(len(variants), 1)
+
+    def test_unknown_returns_empty(self) -> None:
+        self.assertEqual(plan_variants("make docs-check", depth=1), [])
+
+
+class TestSearchCLI(unittest.TestCase):
+    def test_same_path_backtracks(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, HARNESS_LAB_RUNS=d)
+            target = Path(d) / "s.txt"
+            proc = subprocess.run(
+                [sys.executable, "-m", "mvp.handle",
+                 "--task", "文件里要既有 a 又有 b",
+                 "--verify", f"grep -q a {target} && grep -q b {target}",
+                 "--auto-plan"],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("search=2", proc.stdout)
+            content = target.read_text(encoding="utf-8")
+            self.assertIn("a", content)
+            self.assertIn("b", content)
+
+    def test_width_one_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, HARNESS_LAB_RUNS=d)
+            target = Path(d) / "s.txt"
+            proc = subprocess.run(
+                [sys.executable, "-m", "mvp.handle",
+                 "--task", "文件里要既有 a 又有 b",
+                 "--verify", f"grep -q a {target} && grep -q b {target}",
+                 "--auto-plan", "--width", "1"],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
 
 
 class TestAutoPlanCLI(unittest.TestCase):

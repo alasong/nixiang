@@ -204,6 +204,17 @@ python3 -m mvp.handle --task "给我一个包含 hello 的文件" \
 认 `grep -q <内容> <路径>`、`test -f <路径>`、`A && B`；认不出的验收整段放弃（rc=2），
 不半规划。这就是符号逆向：从“要什么结果”反推“做什么动作”。
 
+同一路径的 `&&` 会先试朴素方案（两次写入，后者覆盖前者），失败后按 `--width/--depth`
+回退到“先写后追加”：
+
+```bash
+python3 -m mvp.handle --task "文件里要既有 a 又有 b" \
+  --verify "grep -q a /tmp/s.txt && grep -q b /tmp/s.txt" --auto-plan
+# search=2/2  /  verify: pass
+```
+
+`--width 1` 只试朴素方案（会失败）；`--depth 0` 关闭回退重分解。
+
 `--progress` 也可单独用于普通任务/候选，逐条打印子目标或候选的完成情况。
 
 真实模型小样本测量（需 key）：
@@ -319,7 +330,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 309 条测试，约 1 秒
+make test        # 315 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 make verify-all  # 一键全量机检：测试/文档/状态/回归/对抗/覆盖/压测/校准
@@ -508,7 +519,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             309 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             315 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
