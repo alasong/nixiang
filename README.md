@@ -1,98 +1,173 @@
 # harness-lab
 
-一个可在本地跑的实验台，用来回答一个问题：**把历史轨迹沉淀下来、按相似度复用，到底能省多少成本、代价是什么质量损失。**
+一个可在本地跑的实验台，回答两个问题：
 
-答案不是靠讨论得出的，是这个库里的代码在公开数据集上跑出来的。核心结论：**降本来自「不调用」，不来自「调得更好」** —— 检索增强（few-shot）反而涨成本，查表复用才降本，但只在「输出空间可枚举」的任务上成立。
+1. **把历史轨迹沉淀下来复用，能省多少成本、掉多少质量？**
+2. **系统能不能自己从轨迹里学出规则，然后不调模型地把事做对？**
+
+答案不是讨论出来的，是这个仓库的代码跑出来的。核心结论一句：**降本来自「不调用」，不来自「调得更好」**——检索增强（few-shot）涨成本，规则命中才降本，且只在「输出空间可枚举」的任务上成立。
 
 ---
 
-## 30 秒跑起来（macOS）
+## 现在能做什么
 
-前提：Python **3.10+**。macOS 自带的 `python3` 往往是 3.9，先确认：
+| 能力 | 命令 | 本机读数 |
+|---|---|---|
+| 三路径成本对照（基线 / 检索增强 / 指纹命中） | `python3 -m mvp` | C 路径 −52.3% 成本、+8.3pp 质量 |
+| 留出集评估 + 双跑差异归因 | `python3 -m mvp.loop.evaluator` | C 过门；12 条留出中 9 条差异 100% 可解释 |
+| **从零学规则并切换** | `python3 -m mvp.demos.self_improve` | 冷启动 78%/1375 token → 学出 7 条后 100%/10 token |
+| 规则回放验证（激活门） | `python3 -m mvp.loop.validator --demo` | 7 条 100%；坏规则误伤 36 条判红 |
+| 规则挖掘（学条件→结论） | `python3 -m mvp.loop.learner --demo` | 7/7 条学出，留出零误伤零漏报 |
+| 运行时监控（4 项） | `make regress` / `python3 -m mvp.loop.probe --demo` / `python3 -m mvp.loop.sampling --demo` / `make adversarial` | 回归绿、探针 14% 报差异、TV 0.885→0.542、对抗 100% |
+
+全部零第三方依赖，只用标准库。
+
+---
+
+## 5 分钟上手
+
+前提 Python **3.10+**（macOS 自带常是 3.9）：
 
 ```bash
 python3 -V
-# 低于 3.10 就装一个：brew install python@3.12
 ```
 
-然后：
+在仓库根目录执行（以下命令同理）；主流程不需要 `pip install`，产物写进 `runs/`：
 
 ```bash
-cd harness-lab
 python3 -m mvp
 ```
 
-**不需要 `pip install` 任何东西** —— 核心包只用标准库。这一步会跑完三条路径的对照实验，把产物写进 `runs/`。
-
-想看测试：
+跑测试与文档/状态机检：
 
 ```bash
-python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_diff mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_rules_lifecycle mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_validator mvp.tests.test_learner mvp.tests.test_trace_facts mvp.tests.test_labels mvp.tests.test_probe mvp.tests.test_sampling mvp.tests.test_adversarial mvp.tests.test_self_improve mvp.tests.test_status_check mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek
+make test        # 207 条测试，约 1 秒
+make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
+make status      # 落地状态表引用的命令是否都存在
 ```
 
-207 个测试，同样零依赖。
-
----
-
-## 需要分析工具时
-
-`tools/` 下的真实数据复现用到 numpy / pandas / pyarrow / scikit-learn：
+想先看「这套东西到底能干什么」，跑闭环：
 
 ```bash
-./bootstrap.sh
+python3 -m mvp.demos.self_improve
 ```
 
-它会建 `.venv`、装依赖、跑测试、跑 demo。只有核心 demo 需求时可 `./bootstrap.sh --core` 跳过依赖安装。
+预期输出（合成域）：
 
-之后用 venv：
-
-```bash
-source .venv/bin/activate
-make real-check     # 在 Banking77 / GSM8K 上复现查表实验
-make cluster        # 聚类检验演示（验「有没有任务分布」）
+```
+阶段 1  冷启动 200 条：成功率 78.0%，平均 1375 token/条
+阶段 2  从轨迹 + 台账学出 7 条规则，过激活门 7 条：['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7']
+阶段 3  切换后 200 条：成功率 100.0%，平均 10 token/条，回退模型 0 条
+        同批纯模型基线：78.0%，1375 token/条
+  结论：成本 -99.3%，质量 +22.0pp（合成域；成本按查表 10 token 计）
 ```
 
 ---
 
-## 入口
+## 按目的选命令
 
-| 命令 | 做什么 | 要依赖吗 |
+| 你想知道 | 跑这个 | 看什么 |
 |---|---|---|
-| `python3 -m mvp` | 三路径对照：纯模型 / 检索增强 / 指纹命中 | 否 |
-| `python3 -m mvp.demos.demo_real_task --fresh` | 一个真实任务（调研型）走沉淀管道，演示置信分层 | 否 |
-| `python3 -m mvp.demos.demo_dual_loop` | 双环三轮：探索 → 复核 → 自动晋升 → 命中复用（含时效核验） | 否 |
-| `python3 -m mvp.loop.backward --demo` | 逆向推理：AND-OR 展开、三态求值、部分信息下的确定否定 | 否 |
-| `python3 -m mvp.loop.evaluator` | 留出集评估：经验与索引只用训练段，按 §6.4 判红 | 否 |
-| `python3 -m mvp.demos.route_and_sentry --demo` | 路由决策 + 哨兵巡检（演示目录里埋了四类问题） | 否 |
-| `python3 -m mvp.loop.miner --demo` | 从负证据挖候选短路规则（support / counter），并过激活门 | 否 |
-| `python3 -m mvp.loop.validator --demo` | 回放验证：规则/候选在带真值样本上的通过率与误伤率 | 否 |
-| `python3 -m mvp.loop.validator --regress` | 验证器漂移回归：已知真值语料上 7 条规则必须全绿 | 否 |
-| `python3 -m mvp.loop.learner --demo` | 规则挖掘：训练集学条件→结论，留出集验零误伤零漏报，学出的接引擎实跑 | 否 |
-| `python3 -m mvp.loop.probe --demo` | 哨兵探针：干净/坏快照下两路答案比对，差异率报警 | 否 |
-| `python3 -m mvp.loop.sampling --demo` | 无偏采样：抽样率与探索样本分布偏移（TV 距离） | 否 |
-| `make adversarial` | 对抗审计：漏/多/换近似答案的识别率，<99% 退出码 1 | 否 |
-| `python3 -m mvp.demos.self_improve` | 闭环：冷启动纯模型 → 学规则 → 符号优先（成本/质量对照） | 否 |
-| `make status` | 落地状态表机检：表里引用的命令是否都存在 | 否 |
-| `python3 -m mvp.loop.budget --demo` | 预算切分与守恒（禁止透支、未用归还） | 否 |
-| `python3 -m mvp.loop.maintenance --demo` | 维护回路：巡检 → 晋升 → 淘汰 → 路由（`--dir` 可重复跑） | 否 |
-| `python3 -m mvp.loop.self_bootstrap --demo` | 从自身轨迹导出任务清单并跑 H1 聚类（不依赖人手写） | 否 |
-| `python3 -m mvp.demos.e2e` | 端到端回路：跑任务 → 自举 → H1 → 判红 → 维护（无人工步骤） | 否 |
-| `python3 tools/h1_sweep.py --dataset banking77 --n 200 --seeds 0,1,2,3` | H1 阈值扫描 + 多抽样稳定性 | 是（读 parquet） |
-| `python3 tools/family_stats.py --jsonl tasks.jsonl` | 按族标签直接统计分布（比聚类稳） | 否（jsonl）/ 是（banking77） |
-| `.venv/bin/python tools/real_e2e.py --names /tmp/b77_readme.md` | 真实数据端到端：轨迹 + 两种 H1 + 巡检 + 混合成本 | 是（读 parquet） |
-| `python3 tools/real_check.py --dataset all` | 真实数据集上的覆盖率-准确率-降本三角 | 是 |
-| `python3 tools/cluster_check.py --demo` | 聚类检验，判定任务有无分布 | 否（demo）/ 是（真实数据） |
+| 复用到底省不省钱 | `python3 -m mvp` | 三条路径的成功率 / 平均成本 |
+| 过没过 §6.4 的门 | `python3 -m mvp.loop.evaluator` | 成本降 ≥40% 且质量掉 ≤5pp 才「通过」 |
+| 系统能不能自己学规则 | `python3 -m mvp.demos.self_improve` | 学出几条、切换后成本/质量 |
+| 挖出的规则靠不靠谱 | `python3 -m mvp.loop.learner --demo` | 留出集误伤/漏报；学不出的会明说 |
+| 验证器有没有被放松 | `make regress` / `make adversarial` | 全绿退出 0，判红退出 1 |
+| 收敛有没有在做错事 | `python3 -m mvp.loop.probe --demo` | 两路答案差异率 |
+| 探索样本偏不偏 | `python3 -m mvp.loop.sampling --demo` | TV 距离随抽样率下降 |
+| 维护回路（巡检/晋升/淘汰/路由） | `python3 -m mvp.loop.maintenance --demo` | 告警、晋升、淘汰、路由各几条 |
+| 全回路是否放行 | `python3 -m mvp.demos.e2e` | 末行「总门：通过/未通过」 |
+| 当前落地到哪一步 | `make status` + `docs/落地状态_2026-11.md` | 每条设计需求的现状与证据 |
 
-`make help` 有同样的清单；`make docs-check` 检查本文档与代码是否漂移。
+`make help` 有同样的清单。
 
-**接真实模型**（把上面的仿真换成 DeepSeek 真实调用）：
+---
+
+## 一次完整闭环（手动拆开跑）
+
+```bash
+# 1. 跑任务、落轨迹（带结构化 facts）
+python3 -m mvp.demos.e2e
+
+# 2. 从轨迹 + 标签台账学规则，回放验证
+python3 -m mvp.loop.learner --demo
+
+# 3. 对照「纯模型 vs 符号优先」的成本与质量
+python3 -m mvp.demos.self_improve
+
+# 4. 监控三件套
+make regress
+make adversarial
+python3 -m mvp.loop.probe --demo
+```
+
+学规则的前提是**标签台账有内容**：`labels.jsonl` 由验收环节写（合成域是真值引擎，
+真实域是人工复核/下游回调）。台账覆盖不足 50% 时 `learn_from_ledger` 直接拒绝学习，
+并在报告里写明原因——宁可空手回去等标签。
+
+---
+
+## 接真实模型
+
+把仿真换成 DeepSeek 真实调用（适配器 `mvp/core/llm_deepseek.py`，只用标准库）：
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
 python3 tools/real_llm_check.py --n 20
 ```
 
-成本取 API 返回的 `usage`，成功率仍由同一套验证器判定。适配器在 `mvp/core/llm_deepseek.py`，只用标准库；缺 key 时以退出码 2 报错。
+成本取 API 返回的 `usage`，成功率仍由同一套验证器判定；缺 key 以退出码 2 报错。
+实测参考：`deepseek-chat` 在 Banking77 77 类上准确率 73.8%、平均 583 token/条。
+
+---
+
+## 需要分析工具时
+
+`tools/` 下的真实数据复现要 numpy / pandas / pyarrow / scikit-learn:
+
+```bash
+./bootstrap.sh          # 建 .venv、装依赖、跑测试
+./bootstrap.sh --core   # 只跑核心（不装依赖，最快）
+```
+
+之后用 venv：
+
+```bash
+source .venv/bin/activate
+make real-check   # Banking77 / GSM8K 上复现查表实验
+make cluster      # 聚类检验演示（验「有没有任务分布」）
+```
+
+---
+
+## 接你自己的任务（三步）
+
+**第一步：任务描述攒成 jsonl**（最近工作记录取 50 条，一行一条）：
+
+```jsonl
+{"id": "t1", "text": "审查采购合同的付款条款是否与付款计划一致", "domain": "合同审查"}
+{"id": "t2", "text": "核对报销单住宿标准是否超出城市上限", "domain": "差旅报销"}
+```
+
+`text` 写「这件事要做什么」，不写结论；`domain` 可留空。
+
+**第二步：跑聚类或直接按标签统计**
+
+```bash
+python3 tools/cluster_check.py my_tasks.jsonl --threshold 0.24
+python3 tools/family_stats.py --jsonl my_tasks_with_family.jsonl   # 有族标签时优先
+```
+
+**第三步：按判据决策**
+
+| 结果 | 结论 |
+|---|---|
+| 5–8 个簇，每簇 ≥5 条 | 有分布，架构成立，继续 |
+| 簇数很多、每簇 1–2 条 | 没有分布，**换单任务高质量执行思路，不要做这套** |
+| 全部并成 1–2 个大簇 | 阈值偏低或描述太笼统，调 `--threshold` 重跑 |
+
+真实文本上聚类会误判：400 条 Banking77 查询里，标签口径 9 族成立，聚类口径 τ=0.24 并成 1 簇。
+有标签优先用 `family_stats.py`。这一步过不了，后面的 MVP、逆向链、双环调度都不必做。
 
 ---
 
@@ -102,42 +177,42 @@ python3 tools/real_llm_check.py --n 20
 mvp/                 核心实验（纯标准库，按职责分包）
   __main__.py        python3 -m mvp 的入口
   core/              领域与存储层
-    contracts.py     数据结构：Trace / Step / Verdict / Goal
+    contracts.py     Trace / Step / Verdict（judgment 枚举、facts、双版本号）
     tasks.py         报销判定域 + 真值规则引擎（合成任务）
-    rules.py         规则库：7 条规则变成 AND-OR 条件树 + 生命周期（candidate/active/retired，容量 300）
+    rules.py         7 条规则（AND-OR 树）+ 生命周期（candidate/active/retired、容量 300）
     verifier.py      判定型验证器
     llm.py           模型接口 + 仿真实现
     llm_deepseek.py  DeepSeek 真实 API 适配器
     store.py         经验库 + 记录器
-    persistence.py   五类 append-only 产物（含 usage / retired）
+    persistence.py   七类 append-only 产物（traces/negative/experience/usage/retired/labels/probes）
     snapshot.py      快照实体（验证器版本 + 经验 id + 时效）
-    datasets.py      数据集附带文件定位 + 下载缓存
+    datasets.py      数据集文件定位 + 下载缓存
     paths.py         路径解析（不依赖 cwd）
   loop/              双环运行层
-    runner.py        三路径对照 + 敏感性分析（可接预算）
-    backward.py      逆向推理：三态求值 + 短路 + 确定否定
+    runner.py        三路径对照（可接预算）
+    backward.py      逆向推理：三态求值 + 短路 + 已证伪停下
     subgoal.py       L1 子目标：局部重分解，用尽才交棒
     budget.py        预算守恒（禁止透支、未用归还）
-    evaluator.py     留出集评估 + §6.4 判红门 + 双跑差异归因（100% 可解释）
+    evaluator.py     留出集评估 + §6.4 判红 + 双跑差异归因 + 偏倚诊断
     router.py        只读聚合统计的路由决策
-    sentry.py        渐进失效探针（只报警，不改数据）
+    sentry.py        巡检告警（负证据率 / 复用失败率 / 探针差异）
     promotion.py     自动晋升（按复用记录）
     retire.py        淘汰（失败率 / 长期未用，append-only 墓碑）
-    miner.py         从负证据挖候选短路规则
+    miner.py         从负证据挖候选短路规则（support / counter）
     validator.py     回放验证：混淆矩阵 + 激活门（support ≥ 5、counter = 0）
-    learner.py       规则挖掘：纯合取搜索 + 析取覆盖，学不出如实报告
-    probe.py         哨兵探针：确定性抽样，两路答案比对，差异落盘
-    sampling.py      无偏采样：强制探索比例 + 探索样本偏倚度量（TV）
-    adversarial.py   对抗审计：近似答案识别率（漏/多/换）
+    learner.py       规则挖掘：纯合取搜索 + 析取覆盖 + 台账读取
+    probe.py         哨兵探针：确定性抽样、两路答案比对、差异落盘
+    sampling.py      无偏采样：强制探索比例 + TV 偏倚度量
+    adversarial.py   对抗审计：近似答案识别率（漏 / 多 / 换）
     maintenance.py   维护回路：巡检 → 晋升 → 淘汰 → 路由
-    self_bootstrap.py 从轨迹导出任务清单并跑 H1（不依赖人手写）
+    self_bootstrap.py 从轨迹导出任务清单并跑 H1
     doccheck.py      README 与代码一致性检查
   demos/             可运行演示
     demo_real_task.py 调研任务沉淀演示
-    demo_dual_loop.py 双环三轮演示（探索 → 复核 → 晋升 → 复用）
+    demo_dual_loop.py 双环三轮（探索 → 复核 → 晋升 → 复用）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
-    self_improve.py  闭环演示：冷启动 → 学规则 → 切换符号优先
+    self_improve.py  闭环：冷启动 → 学规则 → 符号优先
   tests/             207 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
@@ -145,36 +220,38 @@ tools/
   real_c_check.py    C 路径真实化（真实答案索引 + 真实模型补未命中）
   real_llm_check.py  真实 API 的 A/B 对照
   cluster_check.py   H1 聚类检验
-  h1_sweep.py        H1 阈值扫描 + 多抽样稳定性（判据对抽样是否敏感）
+  h1_sweep.py        H1 阈值扫描 + 多抽样稳定性
   family_stats.py    按族标签直接统计分布（有标签时不必聚类）
-  real_e2e.py        真实数据端到端：轨迹 + 两种 H1 口径对照 + 巡检
+  real_e2e.py        真实数据端到端：轨迹 + 两种 H1 + 巡检 + 混合成本
+  status_check.py    落地状态表机检（make status）
 
 data/                700KB 公开数据集（两个 parquet），已内置
-                     Banking77 说明文件缺省时自动下载到 ~/.cache/harness-lab/
 docs/                设计文档、契约、基线声明、实验报告、落地状态总表
 runs/                运行产物（自动生成，已 gitignore）
 ```
 
 ---
 
-## 产物长什么样
+## 产物：七类 append-only 文件
 
-每次 `python3 -m mvp` 生成一个时间戳目录：
+每次运行生成一个目录，磁盘上留下：
 
-```
-runs/20261117-134751/
-  traces.jsonl      执行轨迹：双版本号 + 离散判断点 + 步级成本
-  negative.jsonl    负证据：失败路径 + 输入指纹（下次遇到直接判死路）
-  experience.jsonl  经验条目：(trace_id, vid, verdict)
-```
+| 文件 | 内容 | 谁写 |
+|---|---|---|
+| `traces.jsonl` | 执行轨迹：facts、judgment、步级成本、双版本号 | 两条路径 |
+| `negative.jsonl` | 负证据：失败路径 + 输入指纹 | 内环（唯一写权限） |
+| `experience.jsonl` | 经验条目：(trace_id, vid, verdict) | 外环 |
+| `usage.jsonl` | 复用记录：哪条经验被用上、结果如何 | 内环 |
+| `retired.jsonl` | 淘汰墓碑：加载经验库时过滤这些 id | 维护回路 |
+| `labels.jsonl` | 标签台账：这条任务应判违反哪些规则 | 验收环节 |
+| `probes.jsonl` | 哨兵探针：同一条任务收敛答案 vs 探索答案 | 监控 |
 
-三个文件都是 append-only。集成测试会逐字节验证"重跑不改历史行"。
-
-其中 `negative.jsonl` 的 `input_hashes` 是关键字段 —— 没有它，负证据只是一堆无法利用的废记录。
+全部 append-only，集成测试逐字节验证「重跑不改历史行」。字段含义与归属见
+`docs/沉淀产物说明.md`。
 
 ---
 
-## 三个真实数字（Banking77，10,003 条 / 77 类）
+## 真实数据读数（Banking77，10,003 条 / 77 类）
 
 | 阈值 τ | 覆盖率 | 命中准确率 | 降本 | 质量变化 |
 |---|---|---|---|---|
@@ -182,11 +259,12 @@ runs/20261117-134751/
 | 0.70 | 22.6% | 92.6% | −22% | −0.1pp |
 | 0.60 | 41.5% | 88.1% | −41% | −2.0pp |
 
-上表的「质量变化」按模型准确率 93% 推的。换成实测 `deepseek-chat`（73.8%）后结论反转：查表比模型准，阈值越低越划算——`tools/real_e2e.py` 扫出推荐工作点 τ≈0.45（成本 −72%、质量 +4pp）。
+上表「质量变化」按模型准确率 93% 推。换成实测 `deepseek-chat`（73.8%）后结论反转：
+查表比模型准，阈值越低越划算——`tools/real_e2e.py` 扫出推荐工作点 τ≈0.45
+（成本 −72.2%、质量 +4.0pp，400 条查询）。
 
-对照 GSM8K（输出开放）：同样 20% 覆盖率下，命中准确率 **2.8%**，比 Banking77 的 92.6% 差 33 倍。**这条线划出了适用边界：输出空间可枚举才成立。**
-
-冷启动：每 100 条历史换约 1.6pp 覆盖率，要拿到 40% 覆盖率需要约 1200 条同类记录。
+对照 GSM8K（输出开放）：同样 20% 覆盖率下命中准确率 **2.8%**，比 Banking77 的 92.6% 差 33 倍。
+**这条线划出了适用边界：输出空间可枚举才成立。**
 
 一条能自己算上限的公式（`a` 命中准确率、`p` 模型准确率、`Δ` 可接受质量损失）：
 
@@ -202,58 +280,38 @@ runs/20261117-134751/
 
 | 变量 | 默认 | 用途 |
 |---|---|---|
-| `HARNESS_LAB_HOME` | 项目根 | 覆盖项目根（一般不用） |
+| `HARNESS_LAB_HOME` | 项目根 | 覆盖项目根 |
 | `HARNESS_LAB_RUNS` | `<root>/runs` | 产物目录，可指到外部磁盘 |
+| `HARNESS_LAB_CACHE` | `~/.cache/harness-lab` | 数据集附属文件缓存 |
+| `HARNESS_LAB_OFFLINE` | 空 | 设 1 时禁止下载，缺文件直接报错 |
 
-路径全部经 `mvp/paths.py` 解析，**不依赖当前工作目录** —— 从任何位置调用结果一致。
-
----
-
-## 怎么用在你自己的任务上
-
-三条命令，一天内能出结论。
-
-**第一步：把任务描述攒成 jsonl。** 从最近的工作记录里取 50 条，一行一条：
-
-```jsonl
-{"id": "t1", "text": "审查采购合同的付款条款是否与付款计划一致", "domain": "合同审查"}
-{"id": "t2", "text": "核对报销单住宿标准是否超出城市上限", "domain": "差旅报销"}
-```
-
-`text` 写"这件事要做什么"，不要写结论。`domain` 可留空，填了会额外算簇纯度。
-
-**第二步：跑聚类。**
-
-```bash
-python3 tools/cluster_check.py my_tasks.jsonl --threshold 0.24
-```
-
-**第三步：按判据决策。**
-
-| 结果 | 结论 |
-|---|---|
-| 5-8 个簇，每簇 ≥5 条 | 有分布，这套架构成立，继续 |
-| 簇数很多、每簇 1-2 条 | 没有分布，**换单任务高质量执行思路，不要做这套** |
-| 全部并成 1-2 个大簇 | 阈值偏低或任务描述太笼统，调 `--threshold` 重跑 |
-
-**如果任务已经带族标签**（工单分类、业务类型），不用靠文本聚类猜，直接数：
-
-```bash
-python3 tools/family_stats.py --jsonl my_tasks_with_family.jsonl
-```
-
-标签口径不受阈值与抽样影响，比聚类稳。`tools/real_e2e.py` 在 400 条真实查询上做过对照：**同一批数据，标签口径 9 族成立，聚类口径 τ=0.24 并成 1 簇**——真实文本上聚类口径会误判，优先用标签。
-
-这一步过不了，后面的 MVP、逆向链、双环调度全都不必做。这是唯一能决定方向的一步，也是唯一不能靠讨论替代的一步。
+路径全部经 `mvp/core/paths.py` 解析，**不依赖当前工作目录**。
 
 ---
 
 ## 已知限界
 
-这些不是待办，是这套代码**不能**回答的问题，写在这里防止误读：
+不是待办，是这套代码**不能**回答的问题：
 
-1. **`llm.py` 是仿真模型**，准确率是设定值而非实测。换真实 API 后检索增强路径的数字可能反转。
-2. **合成任务的重复率是构造的**（约 40%）。真实业务的重复率必须自己实测。
-3. **指纹命中的 100% 成功率有真值后门** —— 索引里存的就是答案。降本幅度可信，质量结论不可信。
-4. **成本只算 token**，没算延迟、失败人工介入、SLA 罚金。
-5. **H1（你的任务里有没有分布）未验证。** 拿 50 个真实任务跑 `cluster_check.py` 才能回答，这是唯一决定这套东西该不该继续的一步。
+1. **真实业务域一条数据都没有。** 所有读数来自合成报销域与公开数据集（Banking77 / GSM8K）。
+2. **规则挖掘的 7/7 依赖人给的特征模板**（字段阈值、比值、同期比较、越界判断）。规则由数据选，词表仍由人给。
+3. **合成域存在共线**：R1 被学成「无总监审批」单条件，只因生成器里金额与审批相关；换不共线的域会学成两条合取。
+4. **阈值多是拍的**：抽样 5%、探针 1%、TV 报警、对抗 99%、标签覆盖 50% 都没有真实流量标定。
+5. **`llm.py` 是仿真模型**，准确率是设定值；换真实 API 后检索增强路径的数字可能反转。
+6. **指纹命中的 100% 成功率有真值后门**——索引里存的就是答案。降本幅度可信，质量结论不可信。
+7. **成本只算 token**，没算延迟、失败人工介入、SLA 罚金。
+8. **H1（你的任务里有没有分布）未验证**。拿 50 个真实任务跑 `cluster_check.py` 才能回答。
+
+---
+
+## 文档索引
+
+| 文档 | 回答什么 |
+|---|---|
+| `docs/落地状态_2026-11.md` | 设计条目 → 现状 → 证据命令（`make status` 机检） |
+| `docs/迭代状态_2026-11.md` | 每个部件的读数与未验证项 |
+| `docs/融合双环架构设计v1.0.md` | 双环架构、§6.4 判据、§7 演进、§8 监控 |
+| `docs/双引擎逆向推理设计文档.md` | 逆向链、规则生命周期、P0–P5 阶段验收 |
+| `docs/双环嵌套接口契约v2.md` | 权限矩阵、快照/验证器/预算守恒、五个必过场景 |
+| `docs/沉淀产物说明.md` | 七类产物逐字段说明 |
+| `docs/真实数据报告.md` | Banking77 / GSM8K 的完整读数 |
