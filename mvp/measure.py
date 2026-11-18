@@ -65,10 +65,15 @@ def summarize(rows: list[Measurement]) -> dict:
     if not rows:
         return {"tasks": 0, "single_pass": 0, "best_pass": 0,
                 "mean_delta": 0.0, "mean_wall_ms": 0.0}
+    single_fail = sum(1 for row in rows if not row.single_pass)
+    rescued = sum(1 for row in rows if not row.single_pass and row.best_pass)
     return {
         "tasks": len(rows),
         "single_pass": sum(1 for row in rows if row.single_pass),
         "best_pass": sum(1 for row in rows if row.best_pass),
+        "single_fail": single_fail,
+        "rescued": rescued,
+        "rescue_rate": (rescued / single_fail) if single_fail else 0.0,
         "mean_delta": sum(row.best_score - row.single_score for row in rows) / len(rows),
         "mean_wall_ms": sum(row.wall_ms for row in rows) / len(rows),
     }

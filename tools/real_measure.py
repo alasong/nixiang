@@ -29,6 +29,15 @@ ITEMS = [
          "python3 /tmp/m-4.py | grep -q 7", "/tmp/m-4.py"),
     Item("lines", "写五行关于双环的说明",
          "test $(wc -l < /tmp/m-5.txt) -ge 3", "/tmp/m-5.txt"),
+    Item("strict-bullets", "写三行，每行以 '- ' 开头，内容分别是取证、结论、记录",
+         "test $(grep -c '^- ' /tmp/m-6.txt) -ge 3", "/tmp/m-6.txt"),
+    Item("strict-json", '输出一行 JSON，只包含 "ok" 和 "version" 两个键',
+         "python3 -c \"import json;d=json.load(open('/tmp/m-7.json'));"
+         "assert set(d)=={'ok','version'}\"", "/tmp/m-7.json"),
+    Item("strict-lines", "写恰好两行，每行不超过 15 个汉字",
+         "python3 -c \"lines=open('/tmp/m-8.txt').read().splitlines();"
+         "assert len(lines)==2 and all(len(l)<=15 for l in lines)\"",
+         "/tmp/m-8.txt"),
 ]
 
 
@@ -47,6 +56,8 @@ def main() -> int:
               f"{row.best_index:4d} {row.wall_ms:5d}ms")
     print(f"汇总 tasks={summary['tasks']} single_pass={summary['single_pass']} "
           f"best_pass={summary['best_pass']} "
+          f"single_fail={summary['single_fail']} rescued={summary['rescued']} "
+          f"rescue_rate={summary['rescue_rate']:.2f} "
           f"mean_delta={summary['mean_delta']:.1f} "
           f"mean_wall={summary['mean_wall_ms']:.0f}ms")
 

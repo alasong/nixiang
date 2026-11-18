@@ -69,6 +69,9 @@ class TestMeasure(unittest.TestCase):
             self.assertEqual(summary["best_pass"], 1)
             self.assertEqual(summary["single_pass"], 0)
             self.assertGreater(summary["mean_delta"], 0)
+            self.assertEqual(summary["single_fail"], 1)
+            self.assertEqual(summary["rescued"], 1)
+            self.assertEqual(summary["rescue_rate"], 1.0)
 
     def test_rows_json_serializable(self) -> None:
         with tempfile.TemporaryDirectory() as d:
