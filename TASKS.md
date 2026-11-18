@@ -27,6 +27,7 @@
 | T9 | 跨域压测：多域任务 × 重复 | stress | g9 | `python3 -m mvp.stress --cases tasks/M4/cases.jsonl --repeat 3` | rc=0，输出含 `passed=24` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T10 | 语义 rubric 评审（版本化） | judge | g10 | `python3 -m mvp.handle --task "写一段包含 nixiang 的说明" --out /tmp/xm-judge.txt --verify "grep -q nixiang /tmp/xm-judge.txt" --candidates-from tasks/T10-candidates.jsonl --judge-from tasks/T10-judge.jsonl` | rc=0，输出含 `judge=judge-v1` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T11 | 墙钟预算强制（超时即停） | budget | g11 | `python3 -m mvp.handle --task tasks/T7.md --verify "true" --agents 3 --budget-ms 50` | rc=1，输出含 `budget_exhausted` | done | 0 | 2026-11-18 rc=1 自动验收通过 |
+| T12 | 自由文本任务形式化 + 实时进度 | formalize | g12 | `python3 -m mvp.handle --task "写一份包含 nixiang 的两行说明并保存到 /tmp/xm-f.txt" --verify "grep -q nixiang /tmp/xm-f.txt" --formalize-from tasks/T12-plan.md --progress` | rc=0，输出含 `formalized=formalize-file-v1` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 
 ## 目标条目
 
@@ -44,6 +45,7 @@
 | g9 | 跨域压测可机检（多域任务 × 重复，读数可复现） |
 | g10 | 语义 rubric 评审（版本化、离线可注入） |
 | g11 | 墙钟预算强制（超时即停、不超支） |
+| g12 | 自由文本任务形式化（LLM/离线注入，可执行计划） |
 
 ## 验收协议
 

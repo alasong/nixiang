@@ -25,12 +25,13 @@ import re
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 from .candidates import CandidateError, DeepSeekCandidateProvider, load_jsonl
+from .formalize import DeepSeekFormalizer, FileFormalizer, FormalizeError
 from .judge import DeepSeekJudge, FileJudge, JudgeError
 from .core.contracts import Judgment, Status, Step, Trace, fingerprint
 from .core.llm_deepseek import DeepSeekError
@@ -89,6 +90,7 @@ class HandleResult:
     single_score: int = 0
     judge_vid: str = ""
     budget_ms: int = 0
+    formalizer_vid: str = ""
 
     @property
     def passed(self) -> bool:
@@ -363,12 +365,14 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
            store: RunStore | None = None, cwd: str | Path = ROOT,
            timeout: float = TIMEOUT,
            cached: CachedPlan | None = None,
-           agents: int = 1, budget_ms: int = 0) -> HandleResult:
+           agents: int = 1, budget_ms: int = 0,
+           plan_text: str | None = None, progress: bool = False,
+           formalizer_vid: str = "") -> HandleResult:
     """执行一条任务并用外部命令验收；无论成败都落一条轨迹。"""
     executor = executor or FileWriteExecutor()
     store = store or RunStore(RUNS_DIR / "handle")
     task_id = spec.task_id or new_task_id()
-    content = load_task_text(spec.text)
+    content = plan_text if plan_text is not None else load_task_text(spec.text)
     if cached is not None:
         subgoals, source = cached.subgoals, cached.source
     else:
@@ -377,12 +381,13 @@ def handle(spec: TaskSpec, executor: Executor | None = None,
                   verifier_vid=VERIFIER_VID,
                   facts={"verify": spec.verify, "cwd": str(cwd),
                          "executor": executor.name,
+                         "formalizer_vid": formalizer_vid,
                          "decomposition": source or "none"})
 
     if subgoals:
         return _handle_subgoals(spec, trace, subgoals, source, executor,
                                 store, cwd, timeout, cached, agents,
-                                budget_ms)
+                                budget_ms, progress, formalizer_vid)
 
     parsed = executor.match(content)
     if parsed is None:
@@ -460,7 +465,9 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
                      source: str, executor: Executor, store: RunStore,
                      cwd: str | Path, timeout: float,
                      cached: CachedPlan | None = None,
-                     agents: int = 1, budget_ms: int = 0) -> HandleResult:
+                     agents: int = 1, budget_ms: int = 0,
+                     progress: bool = False,
+                     formalizer_vid: str = "") -> HandleResult:
     """执行子目标；能并行就并行（写域互斥），最后跑全局验收。"""
     task_id = trace.task_id
     trace.attempts = 1
@@ -511,19 +518,34 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
     workers = min(agents, len(subgoals)) if parallel else 1
 
     started = time.monotonic()
+    outcomes: list[dict | None] = [None] * len(subgoals)
     if parallel:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            outcomes = list(pool.map(
-                lambda sub: _run_subgoal(sub, executor, cwd, timeout),
-                subgoals))
+            futures = {
+                pool.submit(_run_subgoal, sub, executor, cwd, timeout): index
+                for index, sub in enumerate(subgoals)}
+            for future in as_completed(futures):
+                index = futures[future]
+                outcome = future.result()
+                outcomes[index] = outcome
+                if progress:
+                    print(f"[progress] 子目标 {index + 1}/{len(subgoals)} "
+                          f"{'pass' if outcome['ok'] else 'fail'} "
+                          f"{outcome['ms']}ms", flush=True)
     else:
-        outcomes = [_run_subgoal(sub, executor, cwd, timeout)
-                    for sub in subgoals]
+        for index, sub in enumerate(subgoals):
+            outcome = _run_subgoal(sub, executor, cwd, timeout)
+            outcomes[index] = outcome
+            if progress:
+                print(f"[progress] 子目标 {index + 1}/{len(subgoals)} "
+                      f"{'pass' if outcome['ok'] else 'fail'} "
+                      f"{outcome['ms']}ms", flush=True)
     wall_ms = int((time.monotonic() - started) * 1000)
 
     passed = 0
     last_rc = -1
     for index, (sub, oc) in enumerate(zip(subgoals, outcomes), 1):
+        assert oc is not None
         if "rc" in oc:
             last_rc = oc["rc"]
         out = {"label": sub.label, "verify": sub.verify}
@@ -568,7 +590,8 @@ def _handle_subgoals(spec: TaskSpec, trace: Trace, subgoals: list[SubGoal],
         plan_reused=cached is not None,
         agents_used=workers,
         stop_reason="budget_exhausted" if over_budget else stop_reason,
-        wall_ms=wall_ms, budget_ms=budget_ms),
+        wall_ms=wall_ms, budget_ms=budget_ms,
+        formalizer_vid=formalizer_vid),
         trace, spec, subgoals, agents)
 
 
@@ -588,7 +611,8 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
                       score_command: str = "", store: RunStore | None = None,
                       cwd: str | Path = ROOT, timeout: float = TIMEOUT,
                       model_calls: int = 0, judge=None,
-                      budget_ms: int = 0) -> HandleResult:
+                      budget_ms: int = 0, progress: bool = False,
+                      formalizer_vid: str = "") -> HandleResult:
     """N 份候选逐份写入 out、验收、打分，留下分数最高且通过的那份。"""
     if not contents:
         raise CandidateError("没有候选")
@@ -601,6 +625,7 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
                   facts={"verify": spec.verify, "out": str(path),
                          "score": score_command,
                          "judge_vid": judge.vid if judge is not None else "",
+                         "formalizer_vid": formalizer_vid,
                          "budget_ms": budget_ms,
                          "candidates": len(contents)})
     trace.attempts = 1
@@ -637,6 +662,9 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
             f"{task_id}#cand{index}", "candidate",
             {"index": index, "rc": rc, "score": score, "output": output},
             Judgment.OK if ok else Judgment.RETRY, 0))
+        if progress:
+            print(f"[progress] 候选 {index}/{len(contents)} "
+                  f"{'pass' if ok else 'fail'} score={score}", flush=True)
         if ok and (best is None or score > best[0]):
             best = (score, index, data)
 
@@ -667,6 +695,7 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
         stop_reason="budget_exhausted" if stopped else "candidates",
         budget_ms=budget_ms,
         judge_vid=judge.vid if judge is not None else "",
+        formalizer_vid=formalizer_vid,
         wall_ms=int((time.monotonic() - started) * 1000),
         candidates_total=len(contents), candidates_passed=passed,
         selected=best[1] if best else 0,
@@ -689,6 +718,8 @@ def render(result: HandleResult, explain: bool = False,
              f"  执行  {result.executor}"]
     if result.plan_reused:
         lines.append("  复用  计划缓存")
+    if result.formalizer_vid:
+        lines.append(f"  formalized={result.formalizer_vid}")
     if result.status == "unsupported":
         lines.append("unsupported: 没有执行器能处理这条任务")
         lines.append("  可用模式：在 <路径> 写入 <内容> / 在 <路径> 追加 <内容> / "
@@ -744,6 +775,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="从 JSONL 读离线评分（可复现）")
     parser.add_argument("--budget-ms", type=int, default=0,
                         help="墙钟预算（毫秒），超时即停")
+    parser.add_argument("--formalize", action="store_true",
+                        help="用 DeepSeek 把自由文本任务转成计划")
+    parser.add_argument("--formalize-from", default="",
+                        help="从计划文件读（离线、可复现）")
+    parser.add_argument("--progress", action="store_true",
+                        help="实时打印子目标/候选进度")
     parser.add_argument("--id", default="", help="任务 id，缺省自动生成")
     parser.add_argument("--runs", default="", help="产物目录，缺省 runs/handle")
     parser.add_argument("--timeout", type=float, default=TIMEOUT)
@@ -751,6 +788,24 @@ def main(argv: list[str] | None = None) -> int:
 
     spec = TaskSpec(text=args.task, verify=args.verify, task_id=args.id)
     store = RunStore(Path(args.runs) if args.runs else RUNS_DIR / "handle")
+    if args.formalize or args.formalize_from:
+        try:
+            formalizer = (FileFormalizer(args.formalize_from)
+                          if args.formalize_from else DeepSeekFormalizer())
+            plan_text = formalizer.formalize(args.task)
+        except (FormalizeError, DeepSeekError) as exc:
+            print(f"形式化失败：{exc}")
+            return 2
+        if not parse_task_file(plan_text):
+            print("形式化失败：计划里没有可解析的子目标（需要 ## 子目标 + 验收：）")
+            return 2
+        result = handle(spec, store=store, timeout=args.timeout,
+                        agents=max(1, args.agents),
+                        budget_ms=args.budget_ms, plan_text=plan_text,
+                        progress=args.progress,
+                        formalizer_vid=formalizer.vid)
+        print(render(result, explain=args.explain, show_audit=args.audit))
+        return 0 if result.passed else 1
     if args.candidates_from or args.candidates:
         if not args.out:
             parser.error("--candidates / --candidates-from 需要 --out")
@@ -786,7 +841,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         result = handle(spec, store=store, timeout=args.timeout,
                         agents=max(1, args.agents),
-                        budget_ms=args.budget_ms)
+                        budget_ms=args.budget_ms, progress=args.progress)
         print(render(result, explain=args.explain, show_audit=args.audit))
     if result.status == "unsupported":
         return 2

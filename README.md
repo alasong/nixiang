@@ -176,6 +176,23 @@ python3 -m mvp.handle --task tasks/T7.md --verify "true" --agents 3 --budget-ms 
 （准确/完整/可执行/无冗余）。它只保证机制可跑、可追溯；**和人类判断是否一致，
 要靠标注样本校准**，仓库里还没有。
 
+自由文本形式化（T12）+ 实时进度：
+
+```bash
+# 离线计划（可复现）
+python3 -m mvp.handle --task "写一份包含 nixiang 的两行说明并保存到 /tmp/xm-f.txt" \
+  --verify "grep -q nixiang /tmp/xm-f.txt" --formalize-from tasks/T12-plan.md --progress
+# [progress] 子目标 1/2 pass 15ms
+# formalized=formalize-file-v1
+
+# 真实模型规划（需要 DEEPSEEK_API_KEY）
+python3 -m mvp.handle --task "在 /tmp/x.txt 写入两行介绍 nixiang" \
+  --verify "grep -q nixiang /tmp/x.txt" --formalize --progress
+# formalized=formalize-ds-v1
+```
+
+`--progress` 也可单独用于普通任务/候选，逐条打印子目标或候选的完成情况。
+
 单条任务：
 
 ```bash
@@ -237,7 +254,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 280 条测试，约 1 秒
+make test        # 286 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 ```
@@ -394,6 +411,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
   candidates.py      候选生成：离线 JSONL 或 DeepSeek 采样（N 路候选）
   stress.py          跨域压测：多域任务 × 重复（python3 -m mvp.stress）
   judge.py           语义 rubric 评审：离线 judge-v1 / DeepSeek judge-ds-v1
+  formalize.py       自由文本 → 子目标计划：离线 formalize-file-v1 / DeepSeek formalize-ds-v1
   loop/              双环运行层
     runner.py        三路径对照（可接预算）
     backward.py      逆向推理：三态求值 + 短路 + 已证伪停下
@@ -419,7 +437,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             280 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             286 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
