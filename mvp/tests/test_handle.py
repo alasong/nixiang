@@ -18,7 +18,8 @@ from pathlib import Path
 
 from mvp.core.contracts import Status
 from mvp.core.persistence import RunStore
-from mvp.handle import FileWriteExecutor, TaskSpec, handle, render
+from mvp.handle import (FileWriteExecutor, TaskSpec, handle,
+                        parse_task_file, render, split_conjunction)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -141,6 +142,112 @@ class TestExecutorContract(unittest.TestCase):
                             store=RunStore(Path(d) / "runs"))
             self.assertTrue(result.passed)
             self.assertEqual(result.executor, "noop")
+
+
+class TestDecomposition(unittest.TestCase):
+    def test_parse_task_file_returns_subgoals(self) -> None:
+        content = """# 任务
+## 子目标
+
+1. 在 /tmp/a.txt 写入 a
+   验收：grep -q a /tmp/a.txt
+2. 在 /tmp/b.txt 写入 b
+   验收：grep -q b /tmp/b.txt
+"""
+        subs = parse_task_file(content)
+        self.assertEqual(len(subs), 2)
+        self.assertEqual(subs[0].verify, "grep -q a /tmp/a.txt")
+        self.assertIn("写入 a", subs[0].action)
+
+    def test_parse_task_file_without_section_is_empty(self) -> None:
+        self.assertEqual(parse_task_file("在 /tmp/a 写入 a"), [])
+
+    def test_split_conjunction_keeps_quoted_amp(self) -> None:
+        self.assertEqual(split_conjunction("a && b && c"), ["a", "b", "c"])
+        self.assertEqual(split_conjunction('grep -q "x && y" f && true'),
+                         ['grep -q "x && y" f', "true"])
+
+    def test_conjunction_is_decomposed_and_counted(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "x.txt"
+            spec = TaskSpec(text=f"在 {target} 写入 x", verify="true && true")
+            result = handle(spec, store=RunStore(Path(d) / "runs"))
+            self.assertTrue(result.passed)
+            self.assertEqual(result.subgoals_passed, 2)
+            self.assertIn("子目标 2/2", render(result))
+
+    def test_composite_file_runs_each_subgoal(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            md = root / "task.md"
+            md.write_text(
+                "## 子目标\n\n"
+                f"1. 在 {root}/a.txt 写入 aa\n   验收：grep -q aa {root}/a.txt\n"
+                f"2. 在 {root}/b.txt 写入 bb\n   验收：grep -q bb {root}/b.txt\n"
+                f"3. 在 {root}/c.txt 写入 cc\n   验收：grep -q cc {root}/c.txt\n",
+                encoding="utf-8")
+            spec = TaskSpec(text=str(md), verify="true")
+            result = handle(spec, store=RunStore(root / "runs"))
+            self.assertTrue(result.passed)
+            self.assertEqual(result.subgoals_passed, 3)
+            for name in ("a.txt", "b.txt", "c.txt"):
+                self.assertTrue((root / name).exists())
+            self.assertIn("子目标 3/3", render(result))
+
+    def test_composite_reports_partial_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            md = root / "task.md"
+            md.write_text(
+                "## 子目标\n\n"
+                f"1. 在 {root}/a.txt 写入 aa\n   验收：true\n"
+                f"2. 在 {root}/b.txt 写入 bb\n   验收：true\n"
+                f"3. 在 {root}/c.txt 写入 cc\n   验收：false\n",
+                encoding="utf-8")
+            spec = TaskSpec(text=str(md), verify="true")
+            result = handle(spec, store=RunStore(root / "runs"))
+            self.assertFalse(result.passed)
+            self.assertEqual(result.subgoals_passed, 2)
+            self.assertIn("子目标 2/3", render(result))
+
+    def test_explain_lists_subgoals(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            md = root / "task.md"
+            md.write_text(
+                "## 子目标\n\n"
+                f"1. 在 {root}/a.txt 写入 aa\n   验收：true\n",
+                encoding="utf-8")
+            result = handle(TaskSpec(text=str(md), verify="true"),
+                            store=RunStore(root / "runs"))
+            text = render(result, explain=True)
+            self.assertIn("子目标 1/1", text)
+            self.assertIn("验收：true", text)
+
+
+class TestAppendLine(unittest.TestCase):
+    def test_append_line_to_end(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "notes.md"
+            target.write_text("x\n", encoding="utf-8")
+            spec = TaskSpec(text=f"在 {target} 末尾加一行 y",
+                            verify=f"grep -q '^y$' {target}")
+            result = handle(spec, store=RunStore(Path(d) / "runs"))
+            self.assertTrue(result.passed)
+            self.assertEqual(target.read_text(encoding="utf-8"), "x\ny\n")
+
+
+class TestCompositeCLI(unittest.TestCase):
+    def test_cli_runs_repo_fixture(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, HARNESS_LAB_RUNS=d)
+            proc = subprocess.run(
+                [sys.executable, "-m", "mvp.handle",
+                 "--task", str(ROOT / "tasks" / "T2.md"),
+                 "--verify", "make docs-check", "--explain"],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("子目标 3/3", proc.stdout)
 
 
 if __name__ == "__main__":

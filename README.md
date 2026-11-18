@@ -72,7 +72,7 @@ python3 -m mvp.board verify T2    # 跑验收，过则 done；连续 3 次不过
 | 入口 | 接什么 | 边界 |
 |---|---|---|
 | `python3 -m mvp.task` | 结构化判定任务（差旅报销字段） | 没有验证器的自由文本不接 |
-| `python3 -m mvp.handle` | 任意任务文本 + 验收命令（M0） | 只做确定性模式；匹配不上返回 `unsupported`（rc=2），不硬猜 |
+| `python3 -m mvp.handle` | 任意任务文本 + 验收命令（M0/M1） | 确定性模式 + 任务文件分解；匹配不上返回 `unsupported`（rc=2），不硬猜 |
 
 任意任务 + 验收命令（M0，执行 → 验收 → 轨迹落盘）：
 
@@ -87,6 +87,21 @@ python3 -m mvp.handle --task "在 /tmp/xm-hello.txt 写入 hello" \
 
 退出码：0 验收通过、1 执行或验收失败、2 没有执行器能处理。轨迹落
 `runs/handle/traces.jsonl`（append-only，含任务原文、验收命令、两步记录）。
+
+任务级逆向分解（M1）：任务文件写 `## 子目标`，每个子目标必须带 `验收：` 命令；
+或者验收命令本身是 `A && B && C` 合取。`--explain` 打出分解树：
+
+```bash
+python3 -m mvp.handle --task tasks/T2.md --verify "make docs-check" --explain
+#   子目标 3/3
+#     子目标 1: 在 /tmp/xm-sg-a.txt 写入 alpha  验收：grep -q alpha /tmp/xm-sg-a.txt
+#     子目标 2: 在 /tmp/xm-sg-b.txt 写入 beta   验收：grep -q beta /tmp/xm-sg-b.txt
+#     子目标 3: 在 /tmp/xm-sg-c.txt 写入 gamma  验收：grep -q gamma /tmp/xm-sg-c.txt
+# verify: pass
+```
+
+没有 `验收：` 的子目标会被分解器丢弃，不许执行；任务文件来源的子目标全过后，
+全局验收仍要单独通过。
 
 单条任务：
 
@@ -149,7 +164,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 245 条测试，约 1 秒
+make test        # 254 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 ```
@@ -328,7 +343,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             245 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             254 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
