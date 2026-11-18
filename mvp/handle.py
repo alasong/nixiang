@@ -813,6 +813,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="失败后把验收输出喂回模型的最大修复轮数")
     parser.add_argument("--repair-from", default="",
                         help="从 JSONL 读离线修复响应（可复现）")
+    parser.add_argument("--auto-plan", action="store_true",
+                        help="从验收谓词反推动作（grep -q / test -f / &&）")
     parser.add_argument("--id", default="", help="任务 id，缺省自动生成")
     parser.add_argument("--runs", default="", help="产物目录，缺省 runs/handle")
     parser.add_argument("--timeout", type=float, default=TIMEOUT)
@@ -820,6 +822,19 @@ def main(argv: list[str] | None = None) -> int:
 
     spec = TaskSpec(text=args.task, verify=args.verify, task_id=args.id)
     store = RunStore(Path(args.runs) if args.runs else RUNS_DIR / "handle")
+    if args.auto_plan:
+        from .backward_plan import plan_from_verify, plan_text
+        subgoals = plan_from_verify(args.verify)
+        if not subgoals:
+            print("自动规划失败：验收条件里没有可反推动作（支持 grep -q / test -f / &&）")
+            return 2
+        result = handle(spec, store=store, timeout=args.timeout,
+                        agents=max(1, args.agents),
+                        budget_ms=args.budget_ms,
+                        plan_text=plan_text(subgoals), progress=args.progress,
+                        formalizer_vid="backward-plan-v1")
+        print(render(result, explain=args.explain, show_audit=args.audit))
+        return 0 if result.passed else 1
     if args.formalize or args.formalize_from:
         try:
             formalizer = (FileFormalizer(args.formalize_from)

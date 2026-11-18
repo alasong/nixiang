@@ -32,6 +32,7 @@
 | T14 | 验收反馈修复（失败原因喂回） | repair | g14 | `python3 -m mvp.handle --task "写一行中文，恰好 20 个汉字，且包含 nixiang" --out /tmp/xm-r.txt --verify "python3 tasks/T14-verify.py /tmp/xm-r.txt" --candidates-from tasks/T14-candidates.jsonl --repair-from tasks/T14-repair.jsonl --repair 1` | rc=0，输出含 `repaired=1` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T15 | 修复空响应自动重试 | repair | g15 | `python3 -m mvp.handle --task "写一行中文，恰好 20 个汉字，且包含 nixiang" --out /tmp/xm-r2.txt --verify "python3 tasks/T14-verify.py /tmp/xm-r2.txt" --candidates-from tasks/T14-candidates.jsonl --repair-from tasks/T15-repair.jsonl --repair 1` | rc=0，输出含 `repaired=1` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T16 | 一键全量验证 verify-all | verify | g16 | `make verify-all` | rc=0 | done | 0 | 2026-11-18 rc=0 自动验收通过 |
+| T17 | 从验收反推动作（--auto-plan） | backward | g17 | `python3 -m mvp.handle --task "给我一个包含 hello 的文件" --verify "grep -q hello /tmp/xm-auto.txt" --auto-plan` | rc=0，输出含 `formalized=backward-plan-v1` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 
 ## 目标条目
 
@@ -54,6 +55,7 @@
 | g14 | 验收反馈修复（失败原因喂回再生成） |
 | g15 | 修复空响应自动重试（空/异常再试一次） |
 | g16 | 一键全量验证（单命令串起所有机检） |
+| g17 | 从验收谓词反推动作（符号逆向规划） |
 
 ## 验收协议
 

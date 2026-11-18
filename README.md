@@ -191,6 +191,19 @@ python3 -m mvp.handle --task "在 /tmp/x.txt 写入两行介绍 nixiang" \
 # formalized=formalize-ds-v1
 ```
 
+从验收反推动作（T17，不调模型）：
+
+```bash
+python3 -m mvp.handle --task "给我一个包含 hello 的文件" \
+  --verify "grep -q hello /tmp/xm-auto.txt" --auto-plan
+# 执行  plan
+#   formalized=backward-plan-v1
+# verify: pass
+```
+
+认 `grep -q <内容> <路径>`、`test -f <路径>`、`A && B`；认不出的验收整段放弃（rc=2），
+不半规划。这就是符号逆向：从“要什么结果”反推“做什么动作”。
+
 `--progress` 也可单独用于普通任务/候选，逐条打印子目标或候选的完成情况。
 
 真实模型小样本测量（需 key）：
@@ -306,7 +319,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 302 条测试，约 1 秒
+make test        # 309 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 make verify-all  # 一键全量机检：测试/文档/状态/回归/对抗/覆盖/压测/校准
@@ -468,6 +481,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
   calibrate.py       rubric 校准：judge 与人类分的一致率（离线样本可复现）
   judge.py           语义 rubric 评审：离线 judge-v1 / DeepSeek judge-ds-v1
   formalize.py       自由文本 → 子目标计划：离线 formalize-file-v1 / DeepSeek formalize-ds-v1
+  backward_plan.py   从验收谓词反推动作（grep -q / test -f / &&）
   repair.py          验收反馈修复：失败原因喂回再生成（repair-file-v1 / repair-ds-v1）
   loop/              双环运行层
     runner.py        三路径对照（可接预算）
@@ -494,7 +508,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             302 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             309 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
