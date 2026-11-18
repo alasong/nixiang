@@ -12,10 +12,10 @@
 """
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ..core.contracts import Trace
+from .sampling import selected
 
 PROBE_RATE = 0.01       # 设计值 1%：不到 1% 的预算，挡住最致命的问题
 SALT = "probe-v1"
@@ -41,13 +41,8 @@ class ProbeResult:
 
 
 def should_probe(task_id: str, rate: float = PROBE_RATE, salt: str = SALT) -> bool:
-    """确定性抽样：同一 id 每次都抽到同一结论。"""
-    if rate <= 0:
-        return False
-    if rate >= 1:
-        return True
-    digest = hashlib.sha256(f"{salt}:{task_id}".encode("utf-8")).hexdigest()
-    return int(digest[:8], 16) % 1_000_000 < int(rate * 1_000_000)
+    """确定性抽样：与无偏采样共用同一个原语，只是 salt 不同。"""
+    return selected(task_id, rate, salt)
 
 
 def _answer(trace: Trace) -> tuple[str, ...]:
