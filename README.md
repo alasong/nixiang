@@ -202,6 +202,21 @@ zsh -ic 'python3 tools/real_measure.py'
 
 读数与限制见 `docs/真实模型测量_2026-11.md`。
 
+rubric 校准（有标注样本时用）：
+
+```bash
+# 离线样本（JSONL：task/content/human），可复现
+python3 -m mvp.calibrate --samples tasks/T13-samples.jsonl \
+  --judge-from tasks/T13-judge.jsonl
+# agree=3/3 mae=6.7 bias=0.0 tolerance=±10
+
+# 真实模型评审（需要 key）
+python3 -m mvp.calibrate --samples my_samples.jsonl --judge
+```
+
+判据：`|judge - human| ≤ tolerance` 算一致；一致率低于 `--min-agree` 返回 1。
+它只负责算术与门限；**样本必须是你的人工标注**，否则就是自评自测。
+
 单条任务：
 
 ```bash
@@ -263,7 +278,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 289 条测试，约 1 秒
+make test        # 295 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 ```
@@ -420,6 +435,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
   candidates.py      候选生成：离线 JSONL 或 DeepSeek 采样（N 路候选）
   stress.py          跨域压测：多域任务 × 重复（python3 -m mvp.stress）
   measure.py         1 份 vs N 份候选的小样本测量（真实模型读数）
+  calibrate.py       rubric 校准：judge 与人类分的一致率（离线样本可复现）
   judge.py           语义 rubric 评审：离线 judge-v1 / DeepSeek judge-ds-v1
   formalize.py       自由文本 → 子目标计划：离线 formalize-file-v1 / DeepSeek formalize-ds-v1
   loop/              双环运行层
@@ -447,7 +463,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             289 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             295 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
