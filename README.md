@@ -24,6 +24,55 @@
 
 ---
 
+## 下一条任务（怎么把任务交给系统）
+
+先把边界说清：**目前只接结构化任务**（差旅报销这套字段）。自由文本任务没有
+对应验证器与领域规则，接进来只会把「判不了」伪装成「判完了」，所以不接。
+
+单条任务：
+
+```bash
+python3 -m mvp.task --json '{"id":"T-1","amount":8000,"has_director_approval":false,
+  "city_tier":1,"hotel_per_night":500,"transport_class":"商务舱",
+  "meal_days":3,"meal_total":200,"invoice_dates":["2026-01-01","2026-01-03"],
+  "trip_start":"2026-01-01","trip_end":"2026-01-02","submitted_month":"2026-01",
+  "has_note":false,"same_day_dup":false}'
+```
+
+输出（每条任务的判定、成本、读取次数，以及哪些规则因为缺字段判不了）：
+
+```
+任务 T-1
+  违规规则  R1, R3, R5
+  判不了    无
+  字段读取  14 次   查表成本 10 token 当量（未调模型）
+
+  规则   结论          读取  缺失字段
+  R1   violated     2  -
+  ...
+```
+
+批量（一行一条 JSON）：
+
+```bash
+python3 -m mvp.task --file my_tasks.jsonl
+```
+
+想和真实模型对照（需要 `DEEPSEEK_API_KEY`）：
+
+```bash
+python3 -m mvp.task --json '...' --model
+# 模型      R1, R3  （832 tokens）  与查表一致
+```
+
+字段：`amount` 金额、`has_director_approval` 是否总监审批、`city_tier` 1=一线、
+`hotel_per_night` 住宿单价、`transport_class` 舱位、`meal_days`/`meal_total` 餐补、
+`invoice_dates` 发票日期、`trip_start`/`trip_end` 行程、`submitted_month` 提交月份、
+`has_note` 跨月说明、`same_day_dup` 同日重复。缺字段不算错——逆向链会返回
+`unknown` 并告诉缺哪个，这正是三态语义的用处。
+
+---
+
 ## 5 分钟上手
 
 前提 Python **3.10+**（macOS 自带常是 3.9）：
@@ -77,6 +126,7 @@ python3 -m mvp.demos.self_improve
 | 探索样本偏不偏 | `python3 -m mvp.loop.sampling --demo` | TV 距离随抽样率下降 |
 | 维护回路（巡检/晋升/淘汰/路由） | `python3 -m mvp.loop.maintenance --demo` | 告警、晋升、淘汰、路由各几条 |
 | 全回路是否放行 | `python3 -m mvp.demos.e2e` | 末行「总门：通过/未通过」 |
+| 交一条自己的任务 | `python3 -m mvp.task --json '...'` | 违规规则 / 判不了 / 读取次数 |
 | 当前落地到哪一步 | `make status` + `docs/落地状态_2026-11.md` | 每条设计需求的现状与证据 |
 
 `make help` 有同样的清单。
@@ -176,6 +226,7 @@ python3 tools/family_stats.py --jsonl my_tasks_with_family.jsonl   # 有族标�
 ```
 mvp/                 核心实验（纯标准库，按职责分包）
   __main__.py        python3 -m mvp 的入口
+  task.py            下一条任务：结构化输入 → 逆向链判定（python3 -m mvp.task）
   core/              领域与存储层
     contracts.py     Trace / Step / Verdict（judgment 枚举、facts、双版本号）
     tasks.py         报销判定域 + 真值规则引擎（合成任务）
@@ -213,7 +264,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             207 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             217 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
