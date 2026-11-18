@@ -36,6 +36,8 @@
 | T18 | 限宽限深搜索（同路径冲突回退） | search | g18 | `python3 -m mvp.handle --task "文件里要既有 a 又有 b" --verify "grep -q a /tmp/xm-s.txt && grep -q b /tmp/xm-s.txt" --auto-plan` | rc=0，输出含 `search=2` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T19 | AND-OR 图 + 证明树 + priority(n) | planner | g19 | `python3 -m mvp.handle --task "三个词都要在同一个文件里" --verify "grep -q a /tmp/xm-p.txt && grep -q b /tmp/xm-p.txt && grep -q c /tmp/xm-p.txt" --auto-plan --explain-plan` | rc=0，输出含 `or=2 tried=2` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T20 | 策略挖掘：按验收形状复用分支选择 | strategy | g20 | `python3 -m mvp.handle --task "文件里要既有 a 又有 b（第二例）" --verify "grep -q a /tmp/xm-p2.txt && grep -q b /tmp/xm-p2.txt" --auto-plan` | rc=0，输出含 `strategy=hit` | todo | 0 | — |
+| T21 | 真实业务数据接入（H1） | data | g21 | `test -s data/real_tasks.jsonl && test "$(wc -l < data/real_tasks.jsonl)" -ge 50` | rc=0 | blocked | 0 | 2026-11-18 等用户提供 50 条真实任务+真值标签到 data/real_tasks.jsonl |
+| T22 | rubric 校准（人工样本） | calibrate | g22 | `test -s data/calibration.jsonl && python3 -m mvp.calibrate --samples data/calibration.jsonl --judge --tolerance 10 --min-agree 0.8` | rc=0，输出含 `agree=` | blocked | 0 | 2026-11-18 等用户提供 20-30 条人工样本到 data/calibration.jsonl；跑 --judge 需要 env 有 DEEPSEEK_API_KEY |
 
 ## 目标条目
 
@@ -62,6 +64,8 @@
 | g18 | 限宽限深搜索（同路径冲突回退） |
 | g19 | AND-OR 图 + 证明树 + priority(n) |
 | g20 | 策略挖掘：按验收形状复用分支选择 |
+| g21 | 真实业务数据接入（H1 / 真实域读数） |
+| g22 | rubric 校准（人工标注样本一致率） |
 
 ## 验收协议
 
