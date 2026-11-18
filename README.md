@@ -217,6 +217,23 @@ python3 -m mvp.calibrate --samples my_samples.jsonl --judge
 判据：`|judge - human| ≤ tolerance` 算一致；一致率低于 `--min-agree` 返回 1。
 它只负责算术与门限；**样本必须是你的人工标注**，否则就是自评自测。
 
+验收反馈修复（T14）：
+
+```bash
+# 离线修复响应（可复现）
+python3 -m mvp.handle --task "写一行中文，恰好 20 个汉字，且包含 nixiang" \
+  --out /tmp/xm-r.txt --verify "python3 tasks/T14-verify.py /tmp/xm-r.txt" \
+  --candidates-from tasks/T14-candidates.jsonl \
+  --repair-from tasks/T14-repair.jsonl --repair 1
+# repaired=1  /  verify: pass
+
+# 真实模型：生成 1 份，失败后最多修 2 轮
+python3 -m mvp.handle ... --candidates 1 --repair 2 --progress
+```
+
+对“有反馈就能改”的失败有用；对精确计数/硬约束这类能力边界，反馈修复无效
+（实录见 `docs/验收反馈修复_2026-11.md`）。
+
 单条任务：
 
 ```bash
@@ -278,7 +295,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 295 条测试，约 1 秒
+make test        # 300 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 ```
@@ -438,6 +455,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
   calibrate.py       rubric 校准：judge 与人类分的一致率（离线样本可复现）
   judge.py           语义 rubric 评审：离线 judge-v1 / DeepSeek judge-ds-v1
   formalize.py       自由文本 → 子目标计划：离线 formalize-file-v1 / DeepSeek formalize-ds-v1
+  repair.py          验收反馈修复：失败原因喂回再生成（repair-file-v1 / repair-ds-v1）
   loop/              双环运行层
     runner.py        三路径对照（可接预算）
     backward.py      逆向推理：三态求值 + 短路 + 已证伪停下
@@ -463,7 +481,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             295 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             300 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）

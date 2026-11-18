@@ -33,6 +33,7 @@ from pathlib import Path
 from .candidates import CandidateError, DeepSeekCandidateProvider, load_jsonl
 from .formalize import DeepSeekFormalizer, FileFormalizer, FormalizeError
 from .judge import DeepSeekJudge, FileJudge, JudgeError
+from .repair import DeepSeekRepairer, FileRepairer, RepairError
 from .core.contracts import Judgment, Status, Step, Trace, fingerprint
 from .core.llm_deepseek import DeepSeekError
 from .core.paths import ROOT, RUNS_DIR
@@ -91,6 +92,7 @@ class HandleResult:
     judge_vid: str = ""
     budget_ms: int = 0
     formalizer_vid: str = ""
+    repaired: int = 0
 
     @property
     def passed(self) -> bool:
@@ -612,7 +614,8 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
                       cwd: str | Path = ROOT, timeout: float = TIMEOUT,
                       model_calls: int = 0, judge=None,
                       budget_ms: int = 0, progress: bool = False,
-                      formalizer_vid: str = "") -> HandleResult:
+                      formalizer_vid: str = "", repairer=None,
+                      repair_rounds: int = 0) -> HandleResult:
     """N 份候选逐份写入 out、验收、打分，留下分数最高且通过的那份。"""
     if not contents:
         raise CandidateError("没有候选")
@@ -626,6 +629,7 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
                          "score": score_command,
                          "judge_vid": judge.vid if judge is not None else "",
                          "formalizer_vid": formalizer_vid,
+                         "repairer_vid": repairer.vid if repairer is not None else "",
                          "budget_ms": budget_ms,
                          "candidates": len(contents)})
     trace.attempts = 1
@@ -635,6 +639,7 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
     single = 0
     last_rc, last_output = -1, ""
     stopped = False
+    repaired_total = 0
     for index, content in enumerate(contents, 1):
         if budget_ms and int((time.monotonic() - started) * 1000) > budget_ms:
             stopped = True
@@ -642,6 +647,21 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
         data = content if content.endswith("\n") else content + "\n"
         path.write_text(data, encoding="utf-8")
         rc, output = _run_verify(spec.verify, cwd, timeout)
+        repaired_here = 0
+        while rc != 0 and repairer is not None and repaired_here < repair_rounds:
+            try:
+                fixed = repairer.repair(spec.text, data, output)
+            except Exception:
+                break
+            data = fixed if fixed.endswith("\n") else fixed + "\n"
+            path.write_text(data, encoding="utf-8")
+            rc, output = _run_verify(spec.verify, cwd, timeout)
+            repaired_here += 1
+            trace.steps.append(_step(
+                f"{task_id}#repair{index}-{repaired_here}", "repair",
+                {"round": repaired_here, "rc": rc, "output": output},
+                Judgment.OK if rc == 0 else Judgment.RETRY, 0))
+        repaired_total += repaired_here
         last_rc, last_output = rc, output
         score = 0
         if rc == 0:
@@ -660,7 +680,8 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
             passed += 1
         trace.steps.append(_step(
             f"{task_id}#cand{index}", "candidate",
-            {"index": index, "rc": rc, "score": score, "output": output},
+            {"index": index, "rc": rc, "score": score,
+             "output": output, "repaired": repaired_here},
             Judgment.OK if ok else Judgment.RETRY, 0))
         if progress:
             print(f"[progress] 候选 {index}/{len(contents)} "
@@ -695,7 +716,7 @@ def handle_candidates(spec: TaskSpec, out: str | Path, contents: list[str],
         stop_reason="budget_exhausted" if stopped else "candidates",
         budget_ms=budget_ms,
         judge_vid=judge.vid if judge is not None else "",
-        formalizer_vid=formalizer_vid,
+        formalizer_vid=formalizer_vid, repaired=repaired_total,
         wall_ms=int((time.monotonic() - started) * 1000),
         candidates_total=len(contents), candidates_passed=passed,
         selected=best[1] if best else 0,
@@ -720,6 +741,8 @@ def render(result: HandleResult, explain: bool = False,
         lines.append("  复用  计划缓存")
     if result.formalizer_vid:
         lines.append(f"  formalized={result.formalizer_vid}")
+    if result.repaired:
+        lines.append(f"  repaired={result.repaired}")
     if result.status == "unsupported":
         lines.append("unsupported: 没有执行器能处理这条任务")
         lines.append("  可用模式：在 <路径> 写入 <内容> / 在 <路径> 追加 <内容> / "
@@ -781,6 +804,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="从计划文件读（离线、可复现）")
     parser.add_argument("--progress", action="store_true",
                         help="实时打印子目标/候选进度")
+    parser.add_argument("--repair", type=int, default=0,
+                        help="失败后把验收输出喂回模型的最大修复轮数")
+    parser.add_argument("--repair-from", default="",
+                        help="从 JSONL 读离线修复响应（可复现）")
     parser.add_argument("--id", default="", help="任务 id，缺省自动生成")
     parser.add_argument("--runs", default="", help="产物目录，缺省 runs/handle")
     parser.add_argument("--timeout", type=float, default=TIMEOUT)
@@ -817,6 +844,11 @@ def main(argv: list[str] | None = None) -> int:
                 provider = DeepSeekCandidateProvider()
                 contents = provider.generate(args.task, args.candidates)
                 model_calls = provider.calls
+            repairer = None
+            if args.repair_from:
+                repairer = FileRepairer.from_jsonl(args.repair_from)
+            elif args.repair > 0:
+                repairer = DeepSeekRepairer()
             judge = None
             if args.judge_from:
                 judge = FileJudge.from_jsonl(args.judge_from)
@@ -825,8 +857,9 @@ def main(argv: list[str] | None = None) -> int:
             result = handle_candidates(
                 spec, args.out, contents, score_command=args.score,
                 store=store, timeout=args.timeout, model_calls=model_calls,
-                judge=judge, budget_ms=args.budget_ms)
-        except (CandidateError, DeepSeekError, JudgeError) as exc:
+                judge=judge, budget_ms=args.budget_ms,
+                repairer=repairer, repair_rounds=max(0, args.repair))
+        except (CandidateError, DeepSeekError, JudgeError, RepairError) as exc:
             print(f"候选失败：{exc}")
             return 2
         print(render(result, explain=args.explain, show_audit=args.audit))

@@ -29,6 +29,7 @@
 | T11 | 墙钟预算强制（超时即停） | budget | g11 | `python3 -m mvp.handle --task tasks/T7.md --verify "true" --agents 3 --budget-ms 50` | rc=1，输出含 `budget_exhausted` | done | 0 | 2026-11-18 rc=1 自动验收通过 |
 | T12 | 自由文本任务形式化 + 实时进度 | formalize | g12 | `python3 -m mvp.handle --task "写一份包含 nixiang 的两行说明并保存到 /tmp/xm-f.txt" --verify "grep -q nixiang /tmp/xm-f.txt" --formalize-from tasks/T12-plan.md --progress` | rc=0，输出含 `formalized=formalize-file-v1` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T13 | rubric 校准工具（一致率） | calibrate | g13 | `python3 -m mvp.calibrate --samples tasks/T13-samples.jsonl --judge-from tasks/T13-judge.jsonl` | rc=0，输出含 `agree=3/3` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
+| T14 | 验收反馈修复（失败原因喂回） | repair | g14 | `python3 -m mvp.handle --task "写一行中文，恰好 20 个汉字，且包含 nixiang" --out /tmp/xm-r.txt --verify "python3 tasks/T14-verify.py /tmp/xm-r.txt" --candidates-from tasks/T14-candidates.jsonl --repair-from tasks/T14-repair.jsonl --repair 1` | rc=0，输出含 `repaired=1` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 
 ## 目标条目
 
@@ -48,6 +49,7 @@
 | g11 | 墙钟预算强制（超时即停、不超支） |
 | g12 | 自由文本任务形式化（LLM/离线注入，可执行计划） |
 | g13 | rubric 校准工具（离线样本可复现，真实样本待输入） |
+| g14 | 验收反馈修复（失败原因喂回再生成） |
 
 ## 验收协议
 
