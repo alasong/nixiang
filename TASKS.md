@@ -24,6 +24,7 @@
 | T6 | 借鉴 goal-tree 的覆盖检查/红检/失败阻断，落进 board | meta | g0 | `python3 -m unittest mvp.tests.test_board_goals -q` | rc=0 | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T7 | 多 Agent 并行子目标 + 过程审计 6/6 | agents | g6,g7 | `python3 -m mvp.handle --task tasks/T7.md --verify "make docs-check" --agents 3 --audit` | rc=0，输出含 `process 6/6` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T8 | N 路候选 + 质量分选择 | select | g8 | `python3 -m mvp.handle --task "写一段包含 nixiang 的说明" --out /tmp/xm-m2b.txt --verify "grep -q nixiang /tmp/xm-m2b.txt" --score "wc -l < /tmp/xm-m2b.txt" --candidates-from tasks/T8-candidates.jsonl` | rc=0，输出含 `candidates=3` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
+| T9 | 跨域压测：多域任务 × 重复 | stress | g9 | `python3 -m mvp.stress --cases tasks/M4/cases.jsonl --repeat 3` | rc=0，输出含 `passed=24` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 
 ## 目标条目
 
@@ -38,6 +39,7 @@
 | g6 | 过程审计可机检（6 项） |
 | g7 | 多 Agent 并行执行子目标（写域互斥） |
 | g8 | N 路候选 + 质量分选择（离线候选可复现） |
+| g9 | 跨域压测可机检（多域任务 × 重复，读数可复现） |
 
 ## 验收协议
 

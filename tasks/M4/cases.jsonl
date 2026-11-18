@@ -1,0 +1,8 @@
+{"name": "docs-new", "domain": "docs", "task": "在 /tmp/m4-docs.md 写入 # nixiang M4", "verify": "grep -q 'M4' /tmp/m4-docs.md"}
+{"name": "docs-append", "domain": "docs", "task": "在 /tmp/m4-docs.md 追加 ## 验收", "verify": "grep -q '## 验收' /tmp/m4-docs.md"}
+{"name": "data-csv", "domain": "data", "task": "在 /tmp/m4.csv 写入 id,name", "verify": "grep -q 'id,name' /tmp/m4.csv"}
+{"name": "data-row", "domain": "data", "task": "在 /tmp/m4.csv 追加 1,alpha", "verify": "grep -q '1,alpha' /tmp/m4.csv"}
+{"name": "code-script", "domain": "code", "task": "在 /tmp/m4_script.py 写入 print(42)", "verify": "python3 /tmp/m4_script.py | grep -q 42"}
+{"name": "code-append", "domain": "code", "task": "在 /tmp/m4_script.py 追加 # ok", "verify": "grep -q '# ok' /tmp/m4_script.py"}
+{"name": "text-note", "domain": "text", "task": "在 /tmp/m4-note.txt 写入 过程与方法优先", "verify": "grep -q 过程 /tmp/m4-note.txt"}
+{"name": "composite", "domain": "composite", "task": "tasks/T7.md", "verify": "make docs-check", "agents": 3}
