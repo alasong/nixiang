@@ -67,8 +67,26 @@ python3 -m mvp.board verify T2    # 跑验收，过则 done；连续 3 次不过
 
 ## 下一条任务（怎么把任务交给系统）
 
-先把边界说清：**目前只接结构化任务**（差旅报销这套字段）。自由文本任务没有
-对应验证器与领域规则，接进来只会把「判不了」伪装成「判完了」，所以不接。
+两条入口，别混用：
+
+| 入口 | 接什么 | 边界 |
+|---|---|---|
+| `python3 -m mvp.task` | 结构化判定任务（差旅报销字段） | 没有验证器的自由文本不接 |
+| `python3 -m mvp.handle` | 任意任务文本 + 验收命令（M0） | 只做确定性模式；匹配不上返回 `unsupported`（rc=2），不硬猜 |
+
+任意任务 + 验收命令（M0，执行 → 验收 → 轨迹落盘）：
+
+```bash
+python3 -m mvp.handle --task "在 /tmp/xm-hello.txt 写入 hello" \
+  --verify "grep -q hello /tmp/xm-hello.txt"
+# 任务 H-20261118-111419-6133
+#   执行  write_file
+#   验收  rc=0  grep -q hello /tmp/xm-hello.txt
+# verify: pass
+```
+
+退出码：0 验收通过、1 执行或验收失败、2 没有执行器能处理。轨迹落
+`runs/handle/traces.jsonl`（append-only，含任务原文、验收命令、两步记录）。
 
 单条任务：
 
@@ -131,7 +149,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 207 条测试，约 1 秒
+make test        # 245 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 ```
@@ -271,6 +289,7 @@ python3 tools/family_stats.py --jsonl my_tasks_with_family.jsonl   # 有族标�
 mvp/                 核心实验（纯标准库，按职责分包）
   __main__.py        python3 -m mvp 的入口
   task.py            下一条任务：结构化输入 → 逆向链判定（python3 -m mvp.task）
+  handle.py          任意任务 + 验收命令：执行 → 验收 → 轨迹（python3 -m mvp.handle）
   board.py           文本看板：解析/推进/验收/目标覆盖（python3 -m mvp.board）
   core/              领域与存储层
     contracts.py     Trace / Step / Verdict（judgment 枚举、facts、双版本号）
@@ -309,7 +328,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             235 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             245 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
