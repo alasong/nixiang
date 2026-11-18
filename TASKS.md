@@ -1,39 +1,28 @@
-# 这个项目要交什么
+# TASKS
 
-一句话：**用户把任意任务交进来，拿回通过验收的结果。**
-双环、逆向推理是手段；验收通过才算交付。
+北极星：**用户把任意任务交进来，拿回通过验收的结果。**
 
-## 清单（最多 5 行，一次只做一行）
+## 模板
 
-1. ✅ 判定型任务能交能判（当前样例：报销单）
-   验收：`python3 -m mvp.task --json '{"amount": 8000, "has_director_approval": false}'`
-   退出 0，且输出含 `R1`
-   （这是「判」的能力，还不是「做」的能力）
+- 一个任务一行，列固定；不加列、不写散文。
+- `状态` 只取：`todo` / `doing` / `done` / `blocked`。
+- `验收` 列必须是一条可执行命令；`期望` 列写退出码 + 输出子串。
+- `done` 必须有 `证据`：日期 + 退出码。
+- 同时最多 1 个 `doing`；未完成任务不超过 5 个。
 
-2. ❌ 交任意任务 + 验收命令，系统自己动手做完
-   验收：`python3 -m mvp.handle --task "在 /tmp/xm-hello.txt 写入 hello" --verify "grep -q hello /tmp/xm-hello.txt"`
-   退出 0
-   （现在 rc=1：`mvp.handle` 还不存在）
+## 任务
 
-3. ❌ 改仓库里的真文件，并通过检查（不是玩具文件）
-   验收：`python3 -m mvp.handle --task "在 README 末尾加一行 ## 验收" --verify "grep -q '## 验收' README.md && make docs-check"`
-   退出 0
+| id | 任务 | 能力 | 验收命令 | 期望 | 状态 | 证据 |
+|---|---|---|---|---|---|---|
+| T1 | 判定型任务能交能判（报销样例） | judge | `python3 -m mvp.task --json '{"amount": 8000, "has_director_approval": false}'` | rc=0，输出含 `R1` | done | 2026-11-18 rc=0 |
+| T2 | 任意任务 + 验收命令，系统动手做完 | act | `python3 -m mvp.handle --task "在 /tmp/xm-hello.txt 写入 hello" --verify "grep -q hello /tmp/xm-hello.txt"` | rc=0，输出含 `verify: pass` | todo | — |
+| T3 | 改仓库里的真文件并通过检查 | act | `python3 -m mvp.handle --task "在 README 末尾加一行 ## 验收" --verify "grep -q '## 验收' README.md && make docs-check"` | rc=0，输出含 `verify: pass` | todo | — |
+| T4 | 同类任务第二次 0 次模型调用（内环复用） | reuse | `python3 -m mvp.handle --task "在 /tmp/xm-hello.txt 写入 hello" --verify "grep -q hello /tmp/xm-hello.txt" --twice` | rc=0，输出含 `model_calls=0` | todo | — |
+| T5 | 复合任务拆子目标、逐个验收（逆向分解） | decompose | `python3 -m mvp.handle --task tasks/T2.md --verify "make docs-check" --explain` | rc=0，输出含 `子目标 3/3` | todo | — |
 
-4. ❌ 内环复用：同类任务第二次 0 次模型调用（双环落到运行路径）
-   验收：同一条任务连跑两遍，第二遍输出「模型调用 0 次」
-   `python3 -m mvp.handle --task "在 /tmp/xm-hello.txt 写入 hello" --verify "grep -q hello /tmp/xm-hello.txt" --twice`
-   退出 0 且第二遍日志里 `model_calls=0`
+## 验收协议
 
-5. ❌ 逆向分解：一条复合任务拆成子目标，逐个验收（逆向推理落到运行路径）
-   验收：`python3 -m mvp.handle --task tasks/T2.md --verify "make docs-check" --explain` 退出 0，
-   且输出含 `子目标 3/3`
-
-## 两条规矩
-
-- 每行必须能写成**一条命令**，跑完退出 0 才算交；写不出命令的那行，不许开工。
-- **一次只做一行**；做不完就把这行改小，不要回去重新画图。
-
-## 为什么只有这几行
-
-「加个监控模块」上不了这张清单——它没有验收命令。
-凡是上不了这张清单的活，都是自嗨。
+1. 开工：目标行 `状态` 改 `doing`，清空 `证据`。
+2. 收工：跑 `验收命令`，把「日期 + rc + 关键输出」写进 `证据`。
+3. 判定：rc 与输出都符合 `期望` → `done`；否则保持 `doing` 并写清卡点，或缩小验收后回 `todo`。
+4. 不新增列、不改别人的行；新任务追加一行，`id` 连续。
