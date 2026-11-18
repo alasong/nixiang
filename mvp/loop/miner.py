@@ -118,6 +118,15 @@ def demo() -> None:
     for c in rejected(sink):
         print(f"  排除 {c.input_hash}：{c.reason}")
 
+    # 挖掘只是提名，能不能激活由回放验证器判（§7：support ≥ 5、counter = 0）
+    from .validator import validate_candidates
+    decisions = validate_candidates(sink)
+    print()
+    print(f"激活验证（{len(decisions)} 条候选）")
+    for d in decisions:
+        print(f"  {d.report.name} 支持 {d.report.support} → "
+              f"{'激活' if d.ok else '拒绝'}：{'; '.join(d.reasons) or '无'}")
+
 
 if __name__ == "__main__":
     demo()
