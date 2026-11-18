@@ -231,8 +231,9 @@ python3 -m mvp.handle --task "写一行中文，恰好 20 个汉字，且包含 
 python3 -m mvp.handle ... --candidates 1 --repair 2 --progress
 ```
 
-对“有反馈就能改”的失败有用；对精确计数/硬约束这类能力边界，反馈修复无效
-（实录见 `docs/验收反馈修复_2026-11.md`）。
+对“有反馈就能改”的失败有用：3 个信息差任务 initial 0/3、修复救回 2/3
+（`rescue_rate=0.67`）；对精确计数/硬约束这类能力边界，反馈修复无效。
+实录见 `docs/验收反馈修复_2026-11.md`。
 
 单条任务：
 
@@ -452,6 +453,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
   candidates.py      候选生成：离线 JSONL 或 DeepSeek 采样（N 路候选）
   stress.py          跨域压测：多域任务 × 重复（python3 -m mvp.stress）
   measure.py         1 份 vs N 份候选的小样本测量（真实模型读数）
+  repair.py          验收反馈修复（失败原因喂回再生成）
   calibrate.py       rubric 校准：judge 与人类分的一致率（离线样本可复现）
   judge.py           语义 rubric 评审：离线 judge-v1 / DeepSeek judge-ds-v1
   formalize.py       自由文本 → 子目标计划：离线 formalize-file-v1 / DeepSeek formalize-ds-v1
