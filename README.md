@@ -48,6 +48,21 @@
 
 ---
 
+## 看板：TASKS.md
+
+仓库根目录的 `TASKS.md` 就是看板，一个任务一行、固定 7 列（`id / 任务 / 能力 / 验收命令 / 期望 / 状态 / 证据`）。
+状态只有 `todo / doing / done / blocked`，同时最多 1 个 doing，未完成不超过 5 个。
+
+```bash
+python3 -m mvp.board            # 看板视图
+python3 -m mvp.board start T2   # todo → doing
+python3 -m mvp.board verify T2  # 跑验收命令，过则 done 并写证据
+```
+
+没有验收命令的活不许开工——这是这张看板唯一的硬规矩。
+
+---
+
 ## 下一条任务（怎么把任务交给系统）
 
 先把边界说清：**目前只接结构化任务**（差旅报销这套字段）。自由文本任务没有
@@ -151,6 +166,7 @@ python3 -m mvp.demos.self_improve
 | 维护回路（巡检/晋升/淘汰/路由） | `python3 -m mvp.loop.maintenance --demo` | 告警、晋升、淘汰、路由各几条 |
 | 全回路是否放行 | `python3 -m mvp.demos.e2e` | 末行「总门：通过/未通过」 |
 | 交一条自己的任务 | `python3 -m mvp.task --json '...'` | 违规规则 / 判不了 / 读取次数 |
+| 推进任务清单 | `python3 -m mvp.board` | 按 todo/doing/done/blocked 分列；`verify` 跑验收 |
 | 看逆向链本身 | `python3 -m mvp.loop.backward --demo` | 30/30 一致、读取次数、部分信息下的确定否定 |
 | 看双环怎么转 | `python3 -m mvp.demos.demo_dual_loop` | 三轮：探索 → 复核 → 命中复用 |
 | 当前落地到哪一步 | `make status` + `docs/落地状态_2026-11.md` | 每条设计需求的现状与证据 |
@@ -253,6 +269,7 @@ python3 tools/family_stats.py --jsonl my_tasks_with_family.jsonl   # 有族标�
 mvp/                 核心实验（纯标准库，按职责分包）
   __main__.py        python3 -m mvp 的入口
   task.py            下一条任务：结构化输入 → 逆向链判定（python3 -m mvp.task）
+  board.py           文本看板：TASKS.md 的解析/推进/验收（python3 -m mvp.board）
   core/              领域与存储层
     contracts.py     Trace / Step / Verdict（judgment 枚举、facts、双版本号）
     tasks.py         报销判定域 + 真值规则引擎（合成任务）
@@ -290,7 +307,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             217 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             226 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
