@@ -27,10 +27,10 @@ python3 -m mvp
 想看测试：
 
 ```bash
-python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_diff mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_rules_lifecycle mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_validator mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek
+python3 -m unittest mvp.tests.test_mvp mvp.tests.test_integration mvp.tests.test_promotion mvp.tests.test_evaluator mvp.tests.test_diff mvp.tests.test_router mvp.tests.test_backward mvp.tests.test_backward_properties mvp.tests.test_rules_lifecycle mvp.tests.test_budget mvp.tests.test_budget_runner mvp.tests.test_miner mvp.tests.test_validator mvp.tests.test_learner mvp.tests.test_scenarios mvp.tests.test_subgoal mvp.tests.test_retire mvp.tests.test_maintenance mvp.tests.test_self_bootstrap mvp.tests.test_e2e mvp.tests.test_names_resolution mvp.tests.test_doccheck mvp.tests.test_llm_deepseek
 ```
 
-163 个测试，同样零依赖。
+169 个测试，同样零依赖。
 
 ---
 
@@ -67,6 +67,7 @@ make cluster        # 聚类检验演示（验「有没有任务分布」）
 | `python3 -m mvp.loop.miner --demo` | 从负证据挖候选短路规则（support / counter），并过激活门 | 否 |
 | `python3 -m mvp.loop.validator --demo` | 回放验证：规则/候选在带真值样本上的通过率与误伤率 | 否 |
 | `python3 -m mvp.loop.validator --regress` | 验证器漂移回归：已知真值语料上 7 条规则必须全绿 | 否 |
+| `python3 -m mvp.loop.learner --demo` | 规则挖掘：训练集学条件→结论，留出集验零误伤零漏报，学出的接引擎实跑 | 否 |
 | `python3 -m mvp.loop.budget --demo` | 预算切分与守恒（禁止透支、未用归还） | 否 |
 | `python3 -m mvp.loop.maintenance --demo` | 维护回路：巡检 → 晋升 → 淘汰 → 路由（`--dir` 可重复跑） | 否 |
 | `python3 -m mvp.loop.self_bootstrap --demo` | 从自身轨迹导出任务清单并跑 H1 聚类（不依赖人手写） | 否 |
@@ -119,6 +120,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     retire.py        淘汰（失败率 / 长期未用，append-only 墓碑）
     miner.py         从负证据挖候选短路规则
     validator.py     回放验证：混淆矩阵 + 激活门（support ≥ 5、counter = 0）
+    learner.py       规则挖掘：纯合取搜索 + 析取覆盖，学不出如实报告
     maintenance.py   维护回路：巡检 → 晋升 → 淘汰 → 路由
     self_bootstrap.py 从轨迹导出任务清单并跑 H1（不依赖人手写）
     doccheck.py      README 与代码一致性检查
@@ -127,7 +129,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     demo_dual_loop.py 双环三轮演示（探索 → 复核 → 晋升 → 复用）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
-  tests/             163 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             169 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
