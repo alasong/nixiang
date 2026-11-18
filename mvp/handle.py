@@ -830,15 +830,24 @@ def main(argv: list[str] | None = None) -> int:
     store = RunStore(Path(args.runs) if args.runs else RUNS_DIR / "handle")
     if args.auto_plan:
         from .backward_plan import plan_text
-        from .planner import build_plan, render_plan
+        from .planner import Plan, build_plan, render_plan
+        from .strategy import StrategyStore, shape_of
         plan = build_plan(args.verify, depth=max(0, args.depth))
         if plan is None:
             print("自动规划失败：验收条件里没有可反推动作（支持 grep -q / test -f / &&）")
             return 2
+        shape = shape_of(args.verify)
+        sstore = StrategyStore(store.root / "strategies.jsonl")
+        learned = sstore.best(shape)
+        branches = list(plan.branches)
+        if learned is not None:
+            branches.sort(key=lambda b: (b.name != learned, -b.priority))
+        ordered = Plan(tuple(branches), plan.depth, plan.atoms)
+        stats = {b.name: sstore.p(shape, b.name) for b in ordered.branches}
         width = max(1, args.width)
         outcomes: list[bool] = []
         result = None
-        for branch in plan.branches[:width]:
+        for branch in ordered.branches[:width]:
             result = handle(spec, store=store, timeout=args.timeout,
                             agents=max(1, args.agents),
                             budget_ms=args.budget_ms,
@@ -846,13 +855,15 @@ def main(argv: list[str] | None = None) -> int:
                             progress=args.progress,
                             formalizer_vid="backward-plan-v1")
             outcomes.append(result.passed)
+            sstore.record(shape, branch.name, result.passed)
             if result.passed:
                 break
         print(render(result, explain=args.explain, show_audit=args.audit))
-        print(f"search={len(outcomes)}/{len(plan.branches)}")
-        print(f"or={len(plan.branches)} tried={len(outcomes)} depth={plan.depth}")
+        print(f"search={len(outcomes)}/{len(ordered.branches)}")
+        print(f"or={len(ordered.branches)} tried={len(outcomes)} depth={ordered.depth}")
+        print(f"strategy={'hit' if learned is not None else 'miss'}")
         if args.explain_plan:
-            print(render_plan(plan, outcomes))
+            print(render_plan(ordered, outcomes, stats))
         return 0 if result is not None and result.passed else 1
     if args.formalize or args.formalize_from:
         try:

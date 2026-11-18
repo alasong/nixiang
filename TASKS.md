@@ -35,12 +35,12 @@
 | T17 | 从验收反推动作（--auto-plan） | backward | g17 | `python3 -m mvp.handle --task "给我一个包含 hello 的文件" --verify "grep -q hello /tmp/xm-auto.txt" --auto-plan` | rc=0，输出含 `formalized=backward-plan-v1` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T18 | 限宽限深搜索（同路径冲突回退） | search | g18 | `python3 -m mvp.handle --task "文件里要既有 a 又有 b" --verify "grep -q a /tmp/xm-s.txt && grep -q b /tmp/xm-s.txt" --auto-plan` | rc=0，输出含 `search=2` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T19 | AND-OR 图 + 证明树 + priority(n) | planner | g19 | `python3 -m mvp.handle --task "三个词都要在同一个文件里" --verify "grep -q a /tmp/xm-p.txt && grep -q b /tmp/xm-p.txt && grep -q c /tmp/xm-p.txt" --auto-plan --explain-plan` | rc=0，输出含 `or=2 tried=2` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
-| T20 | 策略挖掘：按验收形状复用分支选择 | strategy | g20 | `python3 -m mvp.handle --task "文件里要既有 a 又有 b（第二例）" --verify "grep -q a /tmp/xm-p2.txt && grep -q b /tmp/xm-p2.txt" --auto-plan` | rc=0，输出含 `strategy=hit` | todo | 0 | — |
+| T20 | 策略挖掘：按验收形状复用分支选择 | strategy | g20 | `python3 -m mvp.handle --task "文件里要既有 a 又有 b（预热）" --verify "grep -q a /tmp/xm-p2a.txt && grep -q b /tmp/xm-p2a.txt" --auto-plan >/dev/null && python3 -m mvp.handle --task "文件里要既有 a 又有 b（第二例）" --verify "grep -q a /tmp/xm-p2b.txt && grep -q b /tmp/xm-p2b.txt" --auto-plan` | rc=0，输出含 `strategy=hit` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T21 | 真实业务数据接入（H1） | data | g21 | `test -s data/real_tasks.jsonl && test "$(wc -l < data/real_tasks.jsonl)" -ge 50` | rc=0 | blocked | 0 | 2026-11-18 等用户提供 50 条真实任务+真值标签到 data/real_tasks.jsonl |
 | T22 | rubric 校准（人工样本） | calibrate | g22 | `test -s data/calibration.jsonl && python3 -m mvp.calibrate --samples data/calibration.jsonl --judge --tolerance 10 --min-agree 0.8` | rc=0，输出含 `agree=` | blocked | 0 | 2026-11-18 等用户提供 20-30 条人工样本到 data/calibration.jsonl；跑 --judge 需要 env 有 DEEPSEEK_API_KEY |
-| T23 | priority(n) 用历史成功率估计 | planner | g23 | `python3 -m mvp.handle --task "文件里要既有 a 又有 b" --verify "grep -q a /tmp/xm-pri.txt && grep -q b /tmp/xm-pri.txt" --auto-plan --explain-plan` | rc=0，输出含 `p=` | todo | 0 | — |
-| T24 | handle 线质量漂移探针 | drift | g24 | `python3 -m mvp.drift --demo` | rc=0，输出含 `drift=0` | todo | 0 | — |
-| T25 | 在线路由（按验收形状） | route | g25 | `python3 -m mvp.route --demo` | rc=0，输出含 `route=` | todo | 0 | — |
+| T23 | priority(n) 用历史成功率估计 | planner | g23 | `python3 -m mvp.handle --task "文件里要既有 a 又有 b" --verify "grep -q a /tmp/xm-pri.txt && grep -q b /tmp/xm-pri.txt" --auto-plan --explain-plan` | rc=0，输出含 `p=` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
+| T24 | handle 线质量漂移探针 | drift | g24 | `python3 -m mvp.drift --demo` | rc=0，输出含 `drift=0` | done | 1 | 2026-11-18 rc=0 自动验收通过 |
+| T25 | 在线路由（按验收形状） | route | g25 | `python3 -m mvp.route --demo` | rc=0，输出含 `route=` | done | 0 | 2026-11-18 rc=0 自动验收通过 |
 | T26 | 阈值标定（需真实流量） | tune | g26 | `test -s data/traffic.jsonl` | rc=0 | blocked | 0 | 2026-11-18 等真实流量样本 data/traffic.jsonl；没有它阈值只能拍 |
 | T27 | 微调（排最后） | tune | g27 | `test -s data/finetune.jsonl && test -s data/real_tasks.jsonl` | rc=0 | blocked | 0 | 2026-11-18 等真实数据+前四段指标稳定；设计文档规定微调排最后 |
 

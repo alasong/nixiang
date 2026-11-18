@@ -48,7 +48,8 @@ def build_plan(verify: str, depth: int = 1) -> Plan | None:
                 atoms=len(variants[0]))
 
 
-def render_plan(plan: Plan, outcomes: list[bool]) -> str:
+def render_plan(plan: Plan, outcomes: list[bool],
+                stats: dict[str, float] | None = None) -> str:
     lines = [f"plan: AND({plan.atoms} atoms) depth={plan.depth}"]
     chosen = False
     for index, (branch, ok) in enumerate(zip(plan.branches, outcomes), 1):
@@ -56,8 +57,11 @@ def render_plan(plan: Plan, outcomes: list[bool]) -> str:
         if ok and not chosen:
             status += " (chosen)"
             chosen = True
+        p_text = ""
+        if stats is not None and branch.name in stats:
+            p_text = f" p={stats[branch.name]:.2f}"
         lines.append(f"  OR[{index}] {branch.name} cost={branch.cost:.1f} "
-                     f"priority={branch.priority:.2f} -> {status}")
+                     f"priority={branch.priority:.2f}{p_text} -> {status}")
     lines.append(f"proof: atoms={plan.atoms} "
                  f"or_branches={len(plan.branches)} depth={plan.depth}")
     return "\n".join(lines)

@@ -343,7 +343,7 @@ python3 -m mvp
 跑测试与文档/状态机检：
 
 ```bash
-make test        # 320 条测试，约 1 秒
+make test        # 332 条测试，约 1 秒
 make docs-check  # README 与代码是否漂移（测试数 / 入口 / make 目标）
 make status      # 落地状态表引用的命令是否都存在
 make verify-all  # 一键全量机检：测试/文档/状态/回归/对抗/覆盖/压测/校准
@@ -506,6 +506,10 @@ mvp/                 核心实验（纯标准库，按职责分包）
   judge.py           语义 rubric 评审：离线 judge-v1 / DeepSeek judge-ds-v1
   formalize.py       自由文本 → 子目标计划：离线 formalize-file-v1 / DeepSeek formalize-ds-v1
   backward_plan.py   从验收谓词反推动作（grep -q / test -f / &&）
+  planner.py         AND-OR 图/证明树/priority
+  strategy.py        按验收形状复用分支 + 历史成功率
+  drift.py           质量漂移探针（重跑已知通过任务）
+  route.py           在线路由（backward/decompose/formalize/direct）
   repair.py          验收反馈修复：失败原因喂回再生成（repair-file-v1 / repair-ds-v1）
   loop/              双环运行层
     runner.py        三路径对照（可接预算）
@@ -532,7 +536,7 @@ mvp/                 核心实验（纯标准库，按职责分包）
     route_and_sentry.py 路由与哨兵演示
     e2e.py           端到端回路：跑任务 → 自举 → H1 → 判红 → 维护
     self_improve.py  闭环：冷启动 → 学规则 → 符号优先
-  tests/             320 个测试（单元 / 集成 / 契约场景 / 不变量）
+  tests/             332 个测试（单元 / 集成 / 契约场景 / 不变量）
 
 tools/
   real_check.py      真实数据集检验（Banking77 / GSM8K）
