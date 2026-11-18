@@ -1,11 +1,12 @@
 PY ?= python3
 
-.PHONY: help setup test docs-check demo demo-fresh real-check cluster clean
+.PHONY: help setup test docs-check regress demo demo-fresh real-check cluster clean
 
 help:
 	@echo "make setup       建 venv 并装依赖（等同 ./bootstrap.sh）"
 	@echo "make test        跑全部单测 + 集成测试（零依赖，用系统 python 即可）"
 	@echo "make docs-check  检查 README 的测试数/入口/make 目标是否与代码一致"
+	@echo "make regress     验证器漂移回归（已知真值语料，红了退出码 1）"
 	@echo "make demo        三路径对照实验（纯标准库，无需 venv）"
 	@echo "make demo-fresh  同上，但先清空 runs/"
 	@echo "make real-check  真实数据集复现（需 numpy/pandas/pyarrow/sklearn）"
@@ -20,6 +21,9 @@ test:
 
 docs-check:
 	$(PY) tools/check_docs.py
+
+regress:
+	$(PY) -m mvp.loop.validator --regress
 
 demo:
 	$(PY) -m mvp

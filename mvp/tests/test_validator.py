@@ -16,6 +16,7 @@ from mvp.loop.validator import (
     gate,
     replay,
     replay_all,
+    regress,
     replay_and_activate,
     replay_shortcut,
     validate_candidates,
@@ -196,6 +197,27 @@ class TestReplayAndActivate(unittest.TestCase):
         self.assertFalse(d.ok)
         self.assertEqual(store.get("RX").status, "candidate")
         self.assertNotIn("RX", {r.id for r in store.all()})
+
+
+class TestRegressionGate(unittest.TestCase):
+    """验证器漂移回归（融合 v1.0 §8）：已知真值语料上，规则判据必须保持绿。"""
+
+    def _samples(self) -> list[Sample]:
+        return [Sample(t.id, t.__dict__, frozenset(ground_truth(t)))
+                for t in build_tasks(200)]
+
+    def test_all_rules_green_on_known_corpus(self) -> None:
+        decisions = regress(self._samples())
+        self.assertEqual(len(decisions), 7)
+        red = [(d.report.name, d.reasons) for d in decisions if not d.ok]
+        self.assertEqual(red, [])
+
+    def test_regression_turns_red_with_broken_rule(self) -> None:
+        broken = Rule("R1", "漏掉审批条件",
+                      Fact("金额>5000", ("amount",), lambda f: f["amount"] > 5000))
+        decisions = regress(self._samples(), rules=[broken])
+        self.assertEqual(len(decisions), 1)
+        self.assertFalse(decisions[0].ok)
 
 
 class TestCandidateGate(unittest.TestCase):

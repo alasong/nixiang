@@ -185,6 +185,16 @@ def replay_and_activate(store: RuleStore, rule: Rule,
     return decision
 
 
+def regress(samples: list[Sample], rules=None) -> list[Decision]:
+    """验证器漂移回归（融合 v1.0 §8）：已知真值语料上重放现有规则。
+
+    每条规则一个 Decision；任一判红即说明规则/验证器被改坏了，或真值漂了。
+    退出码由 CLI 给，调用方不用自己拼。
+    """
+    rules = RuleStore().all() if rules is None else tuple(rules)
+    return [gate(replay(rule, samples)) for rule in rules]
+
+
 def validate_candidates(sink) -> list[Decision]:
     """把挖掘出的候选过一遍激活门。候选由 miner 产出，判据在这里，两件事分开。"""
     from .miner import mine
@@ -237,11 +247,33 @@ def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(description="候选规则回放验证")
     ap.add_argument("--demo", action="store_true", help="跑合成域演示")
+    ap.add_argument("--regress", action="store_true",
+                    help="已知真值语料上回归；任一规则判红则退出码 1")
     args = ap.parse_args()
     if args.demo:
         demo()
+    elif args.regress:
+        raise SystemExit(regress_cli())
     else:
         ap.print_help()
+
+
+def regress_cli() -> int:
+    """回归入口：绿了返回 0，红了返回 1（能直接挂 make / CI）。"""
+    from ..core.tasks import build_tasks, ground_truth
+
+    samples = [Sample(t.id, t.__dict__, frozenset(ground_truth(t)))
+               for t in build_tasks(200)]
+    decisions = regress(samples)
+    print(f"验证器回归（{len(samples)} 条已知真值样本，{len(decisions)} 条规则）")
+    for d in decisions:
+        r = d.report
+        print(f"  {r.name:<4} 支持 {r.support:>3} 误伤 {r.counter:>2} "
+              f"漏报 {r.fn:>2} 通过率 {r.accuracy * 100:>5.1f}% → "
+              f"{'绿' if d.ok else '红：' + '；'.join(d.reasons)}")
+    red = [d for d in decisions if not d.ok]
+    print(f"结论：{'通过' if not red else f'{len(red)} 条判红'}")
+    return 0 if not red else 1
 
 
 if __name__ == "__main__":
